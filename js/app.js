@@ -155,7 +155,7 @@ async function scan() {
     <p class="hint" id="scan-hint">QR-Code des Geräts in den Rahmen halten.</p>
     <label class="btn ghost">
       Foto vom QR-Code wählen
-      <input id="photo" type="file" accept="image/*" capture="environment" hidden>
+      <input id="photo" type="file" accept="image/*" hidden>
     </label>
     <details class="manual">
       <summary>Gerät aus Liste wählen</summary>
