@@ -1,5 +1,6 @@
 import * as db from './db.js';
 import { Scanner, decodeImageFile } from './scanner.js';
+import * as st from './stats.js';
 
 const view = document.getElementById('view');
 const titleEl = document.getElementById('title');
@@ -13,7 +14,7 @@ const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '
 const fmtNum = (n) => (Number.isFinite(n) ? n.toLocaleString('de-DE', { maximumFractionDigits: 2 }) : '–');
 
 const fmtDate = (iso) =>
-  new Date(iso).toLocaleDateString('de-DE', { weekday: 'short', day: '2-digit', month: '2-digit', year: '2-digit' });
+  st.parseDate(iso).toLocaleDateString('de-DE', { weekday: 'short', day: '2-digit', month: '2-digit', year: '2-digit' });
 
 const parseNum = (v) => {
   const n = parseFloat(String(v).replace(',', '.'));
@@ -26,13 +27,19 @@ const todayIso = () => {
   return d.toISOString().slice(0, 10);
 };
 
-function toast(msg) {
+function toast(msg, ms = 2200) {
   const el = document.getElementById('toast');
   el.textContent = msg;
   el.classList.add('show');
   clearTimeout(toast.t);
-  toast.t = setTimeout(() => el.classList.remove('show'), 2200);
+  toast.t = setTimeout(() => el.classList.remove('show'), ms);
 }
+
+// Diagramm-Elemente mit data-tip zeigen ihren Wert beim Antippen (Touch hat kein Hover).
+document.addEventListener('click', (e) => {
+  const el = e.target.closest('[data-tip]');
+  if (el) toast(el.dataset.tip, 3000);
+});
 
 function setHeader(title, back) {
   titleEl.textContent = title;
@@ -46,8 +53,12 @@ function setsSummary(sets) {
   return sets.map((s) => `${fmtNum(s.reps)}×${fmtNum(s.weight)}`).join(' · ');
 }
 
-const maxWeight = (session) => Math.max(...session.sets.map((s) => s.weight ?? 0));
-const volume = (session) => session.sets.reduce((sum, s) => sum + (s.reps ?? 0) * (s.weight ?? 0), 0);
+const maxWeight = st.sessionMaxWeight;
+const volume = st.sessionVolume;
+
+const fmtPct = (p) => (p === null ? '–' : `${p > 0 ? '+' : p < 0 ? '−' : '±'}${fmtNum(Math.abs(Math.round(p)))} %`);
+const fmtKg = (n) => `${fmtNum(Math.round(n * 10) / 10)} kg`;
+const fmtVol = (n) => (n >= 10000 ? `${fmtNum(Math.round(n / 100) / 10)} t` : `${fmtNum(Math.round(n))} kg`);
 
 // ---------- Router ----------
 
@@ -59,6 +70,7 @@ const routes = [
   [/^#\/m\/([^/]+)\/edit$/, (id) => editMachine(id)],
   [/^#\/m\/([^/]+)\/log(?:\/([^/]+))?$/, logSession],
   [/^#\/settings$/, settings],
+  [/^#\/stats$/, statsView],
 ];
 
 async function render() {
@@ -118,6 +130,7 @@ async function home() {
         .join('')}
     </ul>
     ${machines.length ? '' : `<p class="empty">Noch keine Geräte. Scanne den QR-Code an einem Gerät, um es anzulegen.</p>`}
+    ${sessions.length ? `<a class="btn ghost" href="#/stats">📊 Statistik</a>` : ''}
     <a class="btn ghost" href="#/new">+ Gerät ohne QR-Code anlegen</a>
   `;
 
@@ -188,26 +201,50 @@ async function scan() {
 
 // ---------- Gerätedetail ----------
 
-function chart(sessions) {
-  const pts = sessions
-    .slice()
-    .reverse()
-    .map((s) => ({ date: s.date, w: maxWeight(s) }));
+// Liniendiagramm für einen Verlauf. pts: [{ date, v }] älteste zuerst.
+function lineChart(pts, label, fmt = fmtKg) {
   if (pts.length < 2) return '';
-  const W = 320, H = 140, P = 24;
-  const ws = pts.map((p) => p.w);
-  let min = Math.min(...ws), max = Math.max(...ws);
+  const W = 320, H = 160, L = 8, R = 8, T = 22, B = 34;
+  const vs = pts.map((p) => p.v);
+  let min = Math.min(...vs), max = Math.max(...vs);
   if (min === max) { min -= 5; max += 5; }
-  const x = (i) => P + (i * (W - 2 * P)) / (pts.length - 1);
-  const y = (w) => H - P - ((w - min) * (H - 2 * P)) / (max - min);
-  const line = pts.map((p, i) => `${i ? 'L' : 'M'}${x(i).toFixed(1)},${y(p.w).toFixed(1)}`).join(' ');
+  const pad = (max - min) * 0.1;
+  min -= pad; max += pad;
+  const x = (i) => L + (i * (W - L - R)) / (pts.length - 1);
+  const y = (v) => T + ((max - v) * (H - T - B)) / (max - min);
+  const line = pts.map((p, i) => `${i ? 'L' : 'M'}${x(i).toFixed(1)},${y(p.v).toFixed(1)}`).join(' ');
+  const hi = Math.max(...vs), lo = Math.min(...vs);
+  const short = (iso) => st.parseDate(iso).toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit' });
   return `
-    <svg class="chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="Verlauf Höchstgewicht">
-      <text x="${P}" y="14" class="axis">${fmtNum(max)} kg</text>
-      <text x="${P}" y="${H - 6}" class="axis">${fmtNum(min)} kg</text>
+    <svg class="chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(label)}">
+      <line x1="${L}" x2="${W - R}" y1="${y(hi).toFixed(1)}" y2="${y(hi).toFixed(1)}" class="grid"/>
+      <line x1="${L}" x2="${W - R}" y1="${y(lo).toFixed(1)}" y2="${y(lo).toFixed(1)}" class="grid"/>
+      <text x="${L}" y="${(y(hi) - 5).toFixed(1)}" class="axis">${fmt(hi)}</text>
+      <text x="${L}" y="${(y(lo) + 13).toFixed(1)}" class="axis">${fmt(lo)}</text>
       <path d="${line}" class="line"/>
-      ${pts.map((p, i) => `<circle cx="${x(i).toFixed(1)}" cy="${y(p.w).toFixed(1)}" r="3.5" class="dot"><title>${fmtDate(p.date)}: ${fmtNum(p.w)} kg</title></circle>`).join('')}
+      ${pts.map((p, i) => `<circle cx="${x(i).toFixed(1)}" cy="${y(p.v).toFixed(1)}" r="4" class="dot"/>`).join('')}
+      ${pts.map((p, i) => `<rect x="${(x(i) - 12).toFixed(1)}" y="0" width="24" height="${H}" class="hit" data-tip="${fmtDate(p.date)}: ${fmt(p.v)}"/>`).join('')}
+      <text x="${L}" y="${H - 4}" class="axis">${short(pts[0].date)}</text>
+      <text x="${W - R}" y="${H - 4}" class="axis" text-anchor="end">${short(pts[pts.length - 1].date)}</text>
     </svg>`;
+}
+
+function recordsCard(sessions) {
+  const r = st.machineRecords(sessions);
+  const p = st.progress(sessions);
+  const row = (label, value, date) =>
+    value ? `<div><dt>${label}</dt><dd>${value}</dd><small>${fmtDate(date)}</small></div>` : '';
+  return `
+    <section class="card">
+      <h2>Rekorde</h2>
+      <dl class="records">
+        ${row('Schwerster Satz', r.heaviest && `${fmtKg(r.heaviest.value)} × ${fmtNum(r.heaviest.reps)}`, r.heaviest?.date)}
+        ${row('Bestes 1RM (geschätzt)', r.bestE1rm && fmtKg(r.bestE1rm.value), r.bestE1rm?.date)}
+        ${row('Höchstes Volumen', r.volume && fmtVol(r.volume.value), r.volume?.date)}
+        ${row('Meiste Wdh. in einem Satz', r.mostReps && `${fmtNum(r.mostReps.value)} × ${fmtKg(r.mostReps.weight)}`, r.mostReps?.date)}
+      </dl>
+      ${p.sinceStart !== null ? `<p class="stats">1RM-Fortschritt: <strong>${fmtPct(p.sinceStart)}</strong> seit Beginn${p.last4Weeks !== null ? ` · <strong>${fmtPct(p.last4Weeks)}</strong> in 4 Wochen` : ''}</p>` : ''}
+    </section>`;
 }
 
 async function machineDetail(id) {
@@ -242,7 +279,21 @@ async function machineDetail(id) {
         : ''
     }
 
-    ${sessions.length > 1 ? `<section class="card"><h2>Verlauf (Höchstgewicht)</h2>${chart(sessions.slice(0, 30))}</section>` : ''}
+    ${sessions.length ? recordsCard(sessions) : ''}
+
+    ${
+      sessions.length > 1
+        ? `<section class="card">
+            <h2>Verlauf</h2>
+            <div class="tabs" role="tablist">
+              <button type="button" role="tab" data-chart="weight" aria-selected="true">Höchstgewicht</button>
+              <button type="button" role="tab" data-chart="e1rm" aria-selected="false">1RM</button>
+              <button type="button" role="tab" data-chart="volume" aria-selected="false">Volumen</button>
+            </div>
+            <div id="chart"></div>
+          </section>`
+        : ''
+    }
 
     ${
       sessions.length
@@ -264,6 +315,23 @@ async function machineDetail(id) {
 
     <a class="btn ghost" href="#/m/${m.id}/edit">Gerät bearbeiten</a>
   `;
+
+  const chartEl = document.getElementById('chart');
+  if (chartEl) {
+    const recent = sessions.slice(0, 30).reverse();
+    const series = {
+      weight: ['Verlauf Höchstgewicht', st.sessionMaxWeight, fmtKg],
+      e1rm: ['Verlauf geschätztes 1RM', st.sessionBestE1rm, fmtKg],
+      volume: ['Verlauf Volumen', st.sessionVolume, fmtVol],
+    };
+    const show = (key) => {
+      const [label, fn, fmt] = series[key];
+      chartEl.innerHTML = lineChart(recent.map((s) => ({ date: s.date, v: fn(s) })), label, fmt);
+      view.querySelectorAll('[data-chart]').forEach((b) => b.setAttribute('aria-selected', b.dataset.chart === key));
+    };
+    view.querySelectorAll('[data-chart]').forEach((b) => (b.onclick = () => show(b.dataset.chart)));
+    show('weight');
+  }
 }
 
 // ---------- Gerät anlegen / bearbeiten ----------
@@ -484,15 +552,22 @@ async function logSession(machineId, sessionId) {
       .filter((s) => s.reps !== null || s.weight !== null);
     if (!sets.length) return toast('Mindestens einen Satz eintragen.');
     const fd = new FormData(e.target);
-    await db.saveSession({
+    const session = {
       id: existing?.id || db.uid(),
       machineId,
       date: fd.get('date'),
       sets,
       note: fd.get('note').trim(),
       createdAt: existing?.createdAt || new Date().toISOString(),
-    });
-    toast('Training gespeichert 💪');
+    };
+    const records = st.newRecords(session, sessions);
+    await db.saveSession(session);
+    if (records.length) {
+      const text = { heaviest: (v) => `schwerster Satz ${fmtKg(v)}`, e1rm: (v) => `1RM ${fmtKg(v)}`, volume: (v) => `Volumen ${fmtVol(v)}` };
+      toast(`🏆 Neuer Rekord: ${records.map((r) => text[r.type](r.value)).join(' · ')}`, 4500);
+    } else {
+      toast('Training gespeichert 💪');
+    }
     location.replace(`#/m/${machineId}`);
   };
 
@@ -503,6 +578,147 @@ async function logSession(machineId, sessionId) {
       await db.deleteSession(existing.id);
       location.replace(`#/m/${machineId}`);
     };
+}
+
+// ---------- Statistik ----------
+
+function barChart(weeks, valueOf, fmt, label) {
+  const W = 320, H = 130, T = 18, B = 20, gap = 2;
+  const vals = weeks.map(valueOf);
+  const max = Math.max(...vals, 1);
+  const bw = (W - gap * (weeks.length - 1)) / weeks.length;
+  const short = (d) => d.toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit' });
+  const bars = weeks
+    .map((w, i) => {
+      const v = vals[i];
+      const h = v ? Math.max(3, (v / max) * (H - T - B)) : 0;
+      const x = i * (bw + gap);
+      const y = H - B - h;
+      // Oben gerundet, unten an der Grundlinie gerade.
+      const r = Math.min(4, bw / 2, h);
+      const path = h
+        ? `M${x},${H - B} V${y + r} Q${x},${y} ${x + r},${y} H${x + bw - r} Q${x + bw},${y} ${x + bw},${y + r} V${H - B} Z`
+        : '';
+      const current = i === weeks.length - 1;
+      return `<g>
+        ${path ? `<path d="${path}" class="bar${current ? ' current' : ''}"/>` : ''}
+        <rect x="${x}" y="0" width="${bw + gap}" height="${H}" class="hit" data-tip="Woche ab ${short(w.start)}: ${fmt(v)}"/>
+      </g>`;
+    })
+    .join('');
+  const maxIdx = vals.indexOf(Math.max(...vals));
+  return `
+    <svg class="chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(label)}">
+      <line x1="0" x2="${W}" y1="${H - B}" y2="${H - B}" class="baseline"/>
+      ${bars}
+      ${vals[maxIdx] ? `<text x="${maxIdx * (bw + gap) + bw / 2}" y="${H - B - (vals[maxIdx] / max) * (H - T - B) - 5}" class="axis" text-anchor="middle">${fmt(vals[maxIdx])}</text>` : ''}
+      <text x="0" y="${H - 5}" class="axis">${short(weeks[0].start)}</text>
+      <text x="${W}" y="${H - 5}" class="axis" text-anchor="end">diese Woche</text>
+    </svg>`;
+}
+
+function heatmap(sessions, weeks = 26, today = new Date()) {
+  const daily = st.dailyStats(sessions);
+  const first = st.weekStart(today);
+  first.setDate(first.getDate() - 7 * (weeks - 1));
+  const vols = [...daily.values()].map((d) => d.volume).filter((v) => v > 0).sort((a, b) => a - b);
+  // Stufen nach Quartilen der eigenen Trainingstage, damit die Farben aussagekräftig bleiben.
+  const q = (p) => vols[Math.min(vols.length - 1, Math.floor(p * vols.length))] ?? 0;
+  const t1 = q(0.25), t2 = q(0.5), t3 = q(0.75);
+  const level = (v) => (!v ? 1 : v <= t1 ? 1 : v <= t2 ? 2 : v <= t3 ? 3 : 4);
+  const todayIso = st.toIso(today);
+  const C = 11, G = 2, LEFT = 18, TOP = 14;
+  const cells = [];
+  const months = [];
+  let lastMonth = -1;
+  for (let w = 0; w < weeks; w++) {
+    for (let d = 0; d < 7; d++) {
+      const date = new Date(first.getFullYear(), first.getMonth(), first.getDate() + w * 7 + d);
+      const iso = st.toIso(date);
+      if (iso > todayIso) continue;
+      if (d === 0 && date.getMonth() !== lastMonth && w < weeks - 2) {
+        lastMonth = date.getMonth();
+        months.push(`<text x="${LEFT + w * (C + G)}" y="10" class="axis">${date.toLocaleDateString('de-DE', { month: 'short' })}</text>`);
+      }
+      const e = daily.get(iso);
+      const tip = e ? `${fmtDate(iso)}: ${e.sessions} Gerät${e.sessions > 1 ? 'e' : ''}, ${fmtVol(e.volume)}` : `${fmtDate(iso)}: kein Training`;
+      cells.push(
+        `<rect x="${LEFT + w * (C + G)}" y="${TOP + d * (C + G)}" width="${C}" height="${C}" rx="2" class="hm ${e ? `l${level(e.volume)}` : 'l0'}" data-tip="${tip}"/>`
+      );
+    }
+  }
+  const W = LEFT + weeks * (C + G);
+  const H = TOP + 7 * (C + G);
+  const dayLabels = ['Mo', '', 'Mi', '', 'Fr', '', 'So']
+    .map((l, d) => (l ? `<text x="0" y="${TOP + d * (C + G) + 9}" class="axis">${l}</text>` : ''))
+    .join('');
+  return `
+    <svg class="chart heatmap" viewBox="0 0 ${W} ${H}" role="img" aria-label="Trainingskalender der letzten ${weeks} Wochen">
+      ${months.join('')}${dayLabels}${cells.join('')}
+    </svg>
+    <div class="hm-legend"><span>weniger</span>${[0, 1, 2, 3, 4].map((l) => `<i class="l${l}"></i>`).join('')}<span>mehr Volumen</span></div>`;
+}
+
+async function statsView() {
+  setHeader('Statistik', '#/');
+  const machines = await db.getMachines();
+  const sessions = await db.getAllSessions();
+  if (!sessions.length) {
+    view.innerHTML = `<p class="empty">Noch keine Trainings erfasst. Sobald du trainierst, erscheinen hier deine Statistiken.</p>`;
+    return;
+  }
+  const o = st.overview(sessions);
+  const weeks = st.weeklyStats(sessions, 12);
+  const byMachine = machines
+    .map((m) => {
+      const list = sessions.filter((s) => s.machineId === m.id);
+      if (!list.length) return null;
+      const last = list.reduce((a, b) => (b.date > a.date ? b : a));
+      return { m, count: list.length, last, p: st.progress(list) };
+    })
+    .filter(Boolean)
+    .sort((a, b) => (b.p.sinceStart ?? -Infinity) - (a.p.sinceStart ?? -Infinity));
+
+  const tile = (value, label) => `<div class="tile"><strong>${value}</strong><span>${label}</span></div>`;
+  view.innerHTML = `
+    <div class="stat-tiles">
+      ${tile(fmtNum(o.daysThisMonth), 'Trainingstage diesen Monat')}
+      ${tile(fmtNum(Math.round(o.avgDaysPerWeek * 10) / 10), 'Ø Tage pro Woche (7 Wochen)')}
+      ${tile(`${fmtNum(o.streak)} 🔥`, o.streak === 1 ? 'Woche in Folge' : 'Wochen in Folge')}
+      ${tile(fmtVol(o.volumeThisWeek), 'Volumen diese Woche')}
+    </div>
+
+    <section class="card">
+      <h2>Trainingskalender</h2>
+      <div class="scroll-x">${heatmap(sessions)}</div>
+    </section>
+
+    <section class="card">
+      <h2>Trainingstage pro Woche</h2>
+      ${barChart(weeks, (w) => w.days, (v) => `${fmtNum(v)} ${v === 1 ? 'Tag' : 'Tage'}`, 'Trainingstage pro Woche, letzte 12 Wochen')}
+    </section>
+
+    <section class="card">
+      <h2>Volumen pro Woche</h2>
+      ${barChart(weeks, (w) => w.volume, fmtVol, 'Volumen pro Woche, letzte 12 Wochen')}
+      <p class="hint">Volumen = Wiederholungen × Gewicht, über alle Sätze.</p>
+    </section>
+
+    <section class="card">
+      <h2>Fortschritt pro Gerät</h2>
+      <ul class="list compact">
+        ${byMachine
+          .map(
+            ({ m, count, last, p }) => `<li><a href="#/m/${m.id}">
+              <div class="li-main"><strong>${esc(m.name)}</strong><small>${count}× · zuletzt ${st.parseDate(last.date).toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit' })}</small></div>
+              <div class="li-side"><span class="${p.sinceStart > 0 ? 'up' : p.sinceStart < 0 ? 'down' : ''}">${fmtPct(p.sinceStart)}</span><small>1RM seit Beginn</small></div>
+            </a></li>`
+          )
+          .join('')}
+      </ul>
+    </section>
+    <p class="hint">Tippe auf Balken oder Kalendertage, um die Werte zu sehen.</p>
+  `;
 }
 
 // ---------- Einstellungen / Backup ----------

@@ -5,7 +5,9 @@ PWA zum Tracken des Trainings im Fitnessstudio:
 - **QR-Code am Gerät scannen** → das Gerät wird erkannt und die hinterlegten, festen Einstellungen (Sitzhöhe, Rückenlehne, …) werden groß angezeigt.
 - **Unbekannter Code** → Gerät einmalig anlegen (Name + beliebige Einstellungen).
 - **Training erfassen** als Sätze × Wiederholungen × Gewicht, vorausgefüllt mit dem letzten Training.
-- **Verlauf** pro Gerät mit Diagramm (Höchstgewicht pro Training).
+- **Verlauf** pro Gerät mit Diagramm (Höchstgewicht, geschätztes 1RM oder Volumen), Rekorden und Fortschritt in %.
+- **Statistik** (📊): Trainingstage diesen Monat, Ø pro Woche, Wochen-Serie, Trainingskalender (Heatmap), Trainingstage und Volumen pro Woche, Fortschritt pro Gerät.
+- **Rekord-Hinweis** beim Speichern, wenn ein Training einen persönlichen Rekord bricht.
 - **Offline-fähig**, alle Daten nur lokal auf dem Gerät (IndexedDB).
 - **Sicherung** als JSON exportieren/importieren (Einstellungen ⚙︎).
 

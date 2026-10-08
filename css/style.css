@@ -229,3 +229,52 @@ legend { padding: 0 6px; color: var(--muted); font-size: 0.95rem; }
 #toast.show { opacity: 1; transform: translate(-50%, 0); }
 
 [hidden] { display: none !important; }
+
+/* ---------- Statistik ---------- */
+:root { --up: #3fb950; --down: #f0883e; --hm-0: var(--surface-2); }
+@media (prefers-color-scheme: light) { :root { --up: #1a7f37; --down: #bc4c00; } }
+
+.chart .grid, .chart .baseline { stroke: var(--surface-2); stroke-width: 1; }
+.chart .hit { fill: transparent; cursor: pointer; }
+.chart .bar { fill: var(--accent); opacity: 0.55; }
+.chart .bar.current { opacity: 1; }
+
+.tabs { display: flex; gap: 6px; margin-bottom: 8px; }
+.tabs button {
+  flex: 1;
+  min-height: 36px;
+  border: 1px solid var(--surface-2);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+.tabs button[aria-selected="true"] { background: var(--surface-2); color: var(--text); font-weight: 600; }
+
+.records { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin: 0; }
+.records div { padding: 10px 12px; border-radius: 10px; background: var(--surface-2); }
+.records dt { color: var(--muted); font-size: 0.8rem; }
+.records dd { margin: 2px 0; font-size: 1.15rem; font-weight: 700; }
+.records small { color: var(--muted); font-size: 0.75rem; }
+
+.stat-tiles { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.tile { display: flex; flex-direction: column; gap: 2px; padding: 14px; border-radius: var(--radius); background: var(--surface); }
+.tile strong { font-size: 1.8rem; line-height: 1.1; }
+.tile span { color: var(--muted); font-size: 0.85rem; }
+
+.scroll-x { overflow-x: auto; }
+.chart.heatmap { min-width: 340px; }
+.hm.l0, .hm-legend .l0 { fill: var(--hm-0); background: var(--hm-0); }
+.hm.l1, .hm-legend .l1 { fill: color-mix(in srgb, var(--accent) 30%, var(--surface-2)); background: color-mix(in srgb, var(--accent) 30%, var(--surface-2)); }
+.hm.l2, .hm-legend .l2 { fill: color-mix(in srgb, var(--accent) 55%, var(--surface-2)); background: color-mix(in srgb, var(--accent) 55%, var(--surface-2)); }
+.hm.l3, .hm-legend .l3 { fill: color-mix(in srgb, var(--accent) 80%, var(--surface-2)); background: color-mix(in srgb, var(--accent) 80%, var(--surface-2)); }
+.hm.l4, .hm-legend .l4 { fill: var(--accent); background: var(--accent); }
+.hm { cursor: pointer; }
+.hm-legend { display: flex; align-items: center; justify-content: flex-end; gap: 3px; margin-top: 6px; color: var(--muted); font-size: 0.75rem; }
+.hm-legend i { width: 11px; height: 11px; border-radius: 2px; }
+.hm-legend span { margin: 0 4px; }
+
+.li-side .up { color: var(--up); }
+.li-side .down { color: var(--down); }
