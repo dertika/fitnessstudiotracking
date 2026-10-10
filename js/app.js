@@ -1,6 +1,7 @@
 import * as db from './db.js';
 import { Scanner, decodeImageFile } from './scanner.js';
 import * as st from './stats.js';
+import * as watch from './watch.js';
 
 const view = document.getElementById('view');
 const titleEl = document.getElementById('title');
@@ -71,6 +72,8 @@ const routes = [
   [/^#\/m\/([^/]+)\/log(?:\/([^/]+))?$/, logSession],
   [/^#\/settings$/, settings],
   [/^#\/stats$/, statsView],
+  [/^#\/inbox(?:\?data=(.*))?$/, (data) => inbox(data ? decodeURIComponent(data) : '')],
+  [/^#\/watch-help$/, watchHelp],
 ];
 
 async function render() {
@@ -131,6 +134,7 @@ async function home() {
     </ul>
     ${machines.length ? '' : `<p class="empty">Noch keine Geräte. Scanne den QR-Code an einem Gerät, um es anzulegen.</p>`}
     ${sessions.length ? `<a class="btn ghost" href="#/stats">📊 Statistik</a>` : ''}
+    ${machines.length ? `<a class="btn ghost" href="#/inbox">⌚ Watch-Einträge einfügen</a>` : ''}
     <a class="btn ghost" href="#/new">+ Gerät ohne QR-Code anlegen</a>
   `;
 
@@ -721,6 +725,155 @@ async function statsView() {
   `;
 }
 
+// ---------- Apple Watch ----------
+
+async function inbox(initial = '') {
+  setHeader('Watch-Einträge', '#/');
+  view.innerHTML = `
+    <p class="info">Führe auf dem iPhone den Kurzbefehl <strong>„Gym Log übernehmen“</strong> aus und füge die Einträge dann hier ein.</p>
+    <button class="btn primary big" id="paste">Aus Zwischenablage einfügen</button>
+    <details class="manual">
+      <summary>Text manuell einfügen</summary>
+      <textarea id="raw" rows="5" placeholder="GT1;…">${esc(initial)}</textarea>
+      <button class="btn ghost small" id="check">Prüfen</button>
+    </details>
+    <div id="preview"></div>
+  `;
+
+  const machines = new Map((await db.getMachines()).map((m) => [m.id, m]));
+  const preview = document.getElementById('preview');
+  const raw = document.getElementById('raw');
+
+  async function show(text) {
+    const { entries, errors } = watch.parseWatchLog(text);
+    const all = await db.getAllSessions();
+    const known = new Set(all.map(watch.sessionKey));
+    const seen = new Set();
+    const rows = entries.map((e) => {
+      const key = watch.sessionKey(e);
+      const status = !machines.has(e.machineId) ? 'unknown' : known.has(key) || seen.has(key) ? 'dup' : 'new';
+      seen.add(key);
+      return { ...e, status };
+    });
+    const fresh = rows.filter((r) => r.status === 'new');
+    if (!rows.length && !errors.length) {
+      preview.innerHTML = `<p class="empty">Keine Einträge gefunden.</p>`;
+      return;
+    }
+    const label = { new: '', dup: 'schon übernommen', unknown: 'unbekanntes Gerät' };
+    preview.innerHTML = `
+      <section class="card">
+        <h2>${fresh.length} neue${fresh.length === 1 ? 's' : ''} Training${fresh.length === 1 ? '' : 's'}</h2>
+        <ul class="list compact">
+          ${rows
+            .map(
+              (r) => `<li class="${r.status === 'new' ? '' : 'muted'}"><div class="row-item">
+                <div class="li-main"><strong>${esc(machines.get(r.machineId)?.name ?? r.machineId)}</strong><small>${fmtDate(r.date)} · ${esc(setsSummary(r.sets))}</small></div>
+                <div class="li-side"><small>${label[r.status]}</small></div>
+              </div></li>`
+            )
+            .join('')}
+        </ul>
+        ${errors.length ? `<p class="hint">${errors.length} Zeile${errors.length === 1 ? '' : 'n'} übersprungen: ${errors.map((e) => esc(e.reason)).join(', ')}</p>` : ''}
+      </section>
+      ${fresh.length ? `<button class="btn primary big" id="apply">${fresh.length} übernehmen</button>` : ''}
+    `;
+    const apply = document.getElementById('apply');
+    if (apply)
+      apply.onclick = async () => {
+        apply.disabled = true;
+        const recordMsgs = [];
+        for (const r of fresh.sort((a, b) => a.date.localeCompare(b.date))) {
+          const session = { id: db.uid(), machineId: r.machineId, date: r.date, sets: r.sets, note: '⌚ Apple Watch', createdAt: new Date().toISOString() };
+          const prev = await db.getSessions(r.machineId);
+          if (st.newRecords(session, prev).length) recordMsgs.push(machines.get(r.machineId).name);
+          await db.saveSession(session);
+        }
+        toast(
+          recordMsgs.length
+            ? `🏆 ${fresh.length} übernommen, neuer Rekord: ${recordMsgs.join(', ')}`
+            : `${fresh.length} Training${fresh.length === 1 ? '' : 's'} übernommen 💪`,
+          4500
+        );
+        location.replace('#/');
+      };
+  }
+
+  document.getElementById('paste').onclick = async () => {
+    try {
+      const text = await navigator.clipboard.readText();
+      raw.value = text;
+      show(text);
+    } catch {
+      raw.closest('details').open = true;
+      raw.focus();
+      toast('Zwischenablage nicht lesbar – bitte manuell einfügen.');
+    }
+  };
+  document.getElementById('check').onclick = () => show(raw.value);
+  if (initial) show(initial);
+}
+
+function watchHelp() {
+  setHeader('Anleitung Apple Watch', '#/settings');
+  view.innerHTML = `
+    <section class="card prose">
+      <h2>So funktioniert es</h2>
+      <p>Auf der Watch speichert ein Kurzbefehl jedes Training als Erinnerung in der Liste <strong>„Gym Log“</strong>. Die Erinnerungen synchronisieren sich später (das kann ein paar Minuten dauern) aufs iPhone. Dort holt ein zweiter Kurzbefehl sie ab, und du fügst sie hier ein.</p>
+      <p class="hint">Die Namen der Aktionen können je nach iOS-Version leicht abweichen. Tipp: In der Kurzbefehle-App über die Suche nach dem Aktionsnamen hinzufügen.</p>
+    </section>
+
+    <section class="card prose">
+      <h2>1. Vorbereitung</h2>
+      <ol>
+        <li>In <strong>Erinnerungen</strong> die Liste <strong>„Gym Log“</strong> anlegen.</li>
+        <li>Hier in ⚙︎ auf <strong>„Geräteliste für Watch kopieren“</strong> tippen.</li>
+      </ol>
+    </section>
+
+    <section class="card prose">
+      <h2>2. Kurzbefehl „Training“ (für die Watch)</h2>
+      <ol>
+        <li><strong>Text</strong>: die kopierte Geräteliste einfügen.</li>
+        <li><strong>Wörterbuch abrufen</strong> (Eingabe: Text) → Variable <code>Geräte</code>.</li>
+        <li><strong>Aus Liste auswählen</strong>: Liste = <code>Geräte</code>, Aufforderung „Gerät?“.</li>
+        <li><strong>Wörterbuchwert abrufen</strong>: Wert für Schlüssel = <code>Ausgewähltes Objekt</code> in <code>Geräte</code> → Variable <code>Gerät</code>.</li>
+        <li><strong>Wörterbuchwert abrufen</strong>: Wert für <code>info</code> in <code>Gerät</code> → <strong>Ergebnis einblenden</strong>. Hier siehst du die Einstellungen und dein letztes Training.</li>
+        <li><strong>Nach Eingabe fragen</strong>: Zahl, „Wie viele Sätze?“, Standard 3.</li>
+        <li><strong>Wiederholen</strong> (Anzahl = die Eingabe). Innerhalb:
+          <ul>
+            <li><strong>Nach Eingabe fragen</strong>: Zahl, „Satz <code>Wiederholungsindex</code>: Wdh.?“</li>
+            <li><strong>Nach Eingabe fragen</strong>: Zahl, Dezimalzahlen erlauben, „Gewicht (kg)?“</li>
+            <li><strong>Text</strong>: <code>Wdh.</code>x<code>Gewicht</code> (z. B. 12x40) → <strong>Zu Variable hinzufügen</strong> <code>Sätze</code>.</li>
+          </ul>
+        </li>
+        <li><strong>Text kombinieren</strong>: <code>Sätze</code> mit eigenem Trennzeichen <strong>/</strong>.</li>
+        <li><strong>Datum formatieren</strong>: Aktuelles Datum, Format „Eigenes“: <code>yyyy-MM-dd</code>.</li>
+        <li><strong>Neue Erinnerung hinzufügen</strong> in Liste „Gym Log“ mit dem Text:<br>
+          <code>GT1;</code><em>Wert für id in Gerät</em><code>;</code><em>Formatiertes Datum</em><code>;</code><em>Kombinierter Text</em></li>
+        <li>In den Details des Kurzbefehls <strong>„Auf Apple Watch zeigen“</strong> einschalten.</li>
+      </ol>
+      <p class="hint">Beispiel für eine fertige Erinnerung: <code>GT1;abc123;2026-10-10;12x40/10x42,5/8x45</code></p>
+    </section>
+
+    <section class="card prose">
+      <h2>3. Kurzbefehl „Gym Log übernehmen“ (fürs iPhone)</h2>
+      <ol>
+        <li><strong>Erinnerungen suchen</strong>: Liste ist „Gym Log“, „Ist erledigt“ ist aus.</li>
+        <li><strong>Text kombinieren</strong>: die gefundenen Erinnerungen mit <strong>Neue Zeile</strong>.</li>
+        <li><strong>In Zwischenablage kopieren</strong>.</li>
+        <li><strong>Wiederholen mit jedem Objekt</strong> in den gefundenen Erinnerungen: <strong>Erinnerung bearbeiten</strong> → „Ist erledigt“ einschalten. (Alternativ: <strong>Erinnerungen entfernen</strong>.)</li>
+      </ol>
+      <p>Danach den Gym Tracker öffnen, auf <strong>„⌚ Watch-Einträge einfügen“</strong> tippen und einfügen. Bereits übernommene Trainings werden erkannt und nicht doppelt gespeichert.</p>
+    </section>
+
+    <section class="card prose">
+      <h2>Neue Geräte oder geänderte Einstellungen</h2>
+      <p>Geräteliste erneut kopieren und in Schritt 2.1 den Text ersetzen. Das „letzte Training“ auf der Watch ist der Stand vom Kopieren.</p>
+    </section>
+  `;
+}
+
 // ---------- Einstellungen / Backup ----------
 
 async function settings() {
@@ -742,10 +895,31 @@ async function settings() {
       <p class="hint">Speicher dauerhaft: ${persisted ? 'ja ✓' : 'nicht garantiert – App über „Zum Home-Bildschirm“ installieren.'}</p>
     </section>
     <section class="card">
+      <h2>Apple Watch</h2>
+      <p class="hint">Trainings per Kurzbefehl auf der Watch erfassen, ohne iPhone im Studio.</p>
+      <button class="btn primary" id="copy-watch">Geräteliste für Watch kopieren</button>
+      <a class="btn ghost" href="#/inbox">Watch-Einträge einfügen</a>
+      <a class="btn ghost" href="#/watch-help">Anleitung</a>
+    </section>
+    <section class="card">
       <h2>Info</h2>
       <p class="hint">Gym Tracker – QR-Code am Gerät scannen, Einstellungen ablesen, Sätze erfassen. Funktioniert offline.</p>
     </section>
   `;
+
+  document.getElementById('copy-watch').onclick = async () => {
+    const last = {};
+    sessions.forEach((x) => {
+      if (!last[x.machineId] || x.date > last[x.machineId].date) last[x.machineId] = x;
+    });
+    const json = JSON.stringify(watch.buildWatchConfig(machines, last));
+    try {
+      await navigator.clipboard.writeText(json);
+      toast(`Geräteliste kopiert (${machines.length} Geräte)`);
+    } catch {
+      prompt('Kopieren nicht möglich – bitte manuell kopieren:', json);
+    }
+  };
 
   document.getElementById('export').onclick = async () => {
     const data = await db.exportAll();
