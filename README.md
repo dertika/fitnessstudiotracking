@@ -11,6 +11,10 @@ PWA zum Tracken des Trainings im Fitnessstudio:
 - **Offline-fähig**, alle Daten nur lokal auf dem Gerät (IndexedDB).
 - **Sicherung** als JSON exportieren/importieren (Einstellungen ⚙︎).
 
+## Apple Watch
+
+Trainings lassen sich ohne iPhone im Studio auf der Apple Watch erfassen: Ein Kurzbefehl speichert jedes Training als Erinnerung in der Liste „Gym Log“, ein zweiter Kurzbefehl auf dem iPhone kopiert sie, und die App übernimmt sie unter „⌚ Watch-Einträge einfügen“. Die Schritt-für-Schritt-Anleitung steht in der App unter ⚙︎ → Apple Watch → Anleitung.
+
 ## Veröffentlichen (GitHub Pages)
 
 1. Repo → **Settings → Pages → Build and deployment → Source: „GitHub Actions“**.

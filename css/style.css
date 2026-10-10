@@ -278,3 +278,15 @@ legend { padding: 0 6px; color: var(--muted); font-size: 0.95rem; }
 
 .li-side .up { color: var(--up); }
 .li-side .down { color: var(--down); }
+
+/* ---------- Apple Watch ---------- */
+.list .row-item { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border-radius: var(--radius); background: var(--surface-2); }
+.list li.muted { opacity: 0.5; }
+.manual textarea { margin-bottom: 8px; font-family: ui-monospace, monospace; font-size: 15px; }
+.prose ol, .prose ul { margin: 0; padding-left: 1.3em; display: flex; flex-direction: column; gap: 6px; }
+.prose ul { margin-top: 6px; }
+.prose p { margin: 0 0 8px; }
+.prose ol + p, .prose ol + p.hint { margin-top: 10px; }
+.prose p.hint { text-align: left; }
+.prose code { padding: 1px 5px; border-radius: 5px; background: var(--surface-2); font-size: 0.9em; overflow-wrap: anywhere; }
+#preview { display: flex; flex-direction: column; gap: 14px; }
