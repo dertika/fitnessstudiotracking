@@ -7,6 +7,7 @@ PWA zum Tracken des Trainings im Fitnessstudio:
 - **Training erfassen** als Sätze × Wiederholungen × Gewicht, vorausgefüllt mit dem letzten Training.
 - **Verlauf** pro Gerät mit Diagramm (Höchstgewicht, geschätztes 1RM oder Volumen), Rekorden und Fortschritt in %.
 - **Statistik** (📊): Trainingstage diesen Monat, Ø pro Woche, Wochen-Serie, Trainingskalender (Heatmap), Trainingstage und Volumen pro Woche, Fortschritt pro Gerät.
+- **Stufen-Geräte**: Pro Gerät einstellbar, ob die Belastung in kg oder als Stufe (z. B. 1–12 im Zirkel) erfasst wird.
 - **Rekord-Hinweis** beim Speichern, wenn ein Training einen persönlichen Rekord bricht.
 - **Offline-fähig**, alle Daten nur lokal auf dem Gerät (IndexedDB).
 - **Sicherung** als JSON exportieren/importieren (Einstellungen ⚙︎).

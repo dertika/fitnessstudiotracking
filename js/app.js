@@ -50,8 +50,8 @@ function setHeader(title, back) {
 
 const go = (hash) => (location.hash = hash);
 
-function setsSummary(sets) {
-  return sets.map((s) => `${fmtNum(s.reps)}×${fmtNum(s.weight)}`).join(' · ');
+function setsSummary(sets, load = KG) {
+  return sets.map((s) => `${fmtNum(s.reps)}×${load.level ? 'St. ' : ''}${fmtNum(s.weight)}`).join(' · ');
 }
 
 const maxWeight = st.sessionMaxWeight;
@@ -60,6 +60,15 @@ const volume = st.sessionVolume;
 const fmtPct = (p) => (p === null ? '–' : `${p > 0 ? '+' : p < 0 ? '−' : '±'}${fmtNum(Math.abs(Math.round(p)))} %`);
 const fmtKg = (n) => `${fmtNum(Math.round(n * 10) / 10)} kg`;
 const fmtVol = (n) => (n >= 10000 ? `${fmtNum(Math.round(n / 100) / 10)} t` : `${fmtNum(Math.round(n))} kg`);
+
+// Belastungsart eines Geräts: Gewicht in kg (Standard) oder Stufe 1…max (z. B. Zirkelgeräte).
+const KG = { level: false, unit: 'kg', fmt: fmtKg, step: 2.5, min: 0, max: Infinity };
+function loadOf(m) {
+  if (m?.load?.type !== 'level') return KG;
+  const max = Math.max(1, Math.round(m.load.max) || 12);
+  return { level: true, unit: 'Stufe', fmt: (v) => `Stufe ${fmtNum(Math.round(v * 10) / 10)}`, step: 1, min: 1, max };
+}
+const isLevelMachine = (m) => loadOf(m).level;
 
 // ---------- Router ----------
 
@@ -126,7 +135,7 @@ async function home() {
               <strong>${esc(m.name)}</strong>
               <small>${m.settings.length ? esc(m.settings.map((s) => `${s.label}: ${s.value}`).join(' · ')) : 'Keine Einstellungen'}</small>
             </div>
-            <div class="li-side">${last[m.id] ? `<small>${fmtDate(last[m.id].date)}</small><span>${fmtNum(maxWeight(last[m.id]))} kg</span>` : ''}</div>
+            <div class="li-side">${last[m.id] ? `<small>${fmtDate(last[m.id].date)}</small><span>${loadOf(m).fmt(maxWeight(last[m.id]))}</span>` : ''}</div>
           </a>
         </li>`
         )
@@ -222,9 +231,13 @@ function lineChart(pts, label, fmt = fmtKg) {
   return `
     <svg class="chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(label)}">
       <line x1="${L}" x2="${W - R}" y1="${y(hi).toFixed(1)}" y2="${y(hi).toFixed(1)}" class="grid"/>
-      <line x1="${L}" x2="${W - R}" y1="${y(lo).toFixed(1)}" y2="${y(lo).toFixed(1)}" class="grid"/>
       <text x="${L}" y="${(y(hi) - 5).toFixed(1)}" class="axis">${fmt(hi)}</text>
-      <text x="${L}" y="${(y(lo) + 13).toFixed(1)}" class="axis">${fmt(lo)}</text>
+      ${
+        hi !== lo
+          ? `<line x1="${L}" x2="${W - R}" y1="${y(lo).toFixed(1)}" y2="${y(lo).toFixed(1)}" class="grid"/>
+             <text x="${L}" y="${(y(lo) + 13).toFixed(1)}" class="axis">${fmt(lo)}</text>`
+          : ''
+      }
       <path d="${line}" class="line"/>
       ${pts.map((p, i) => `<circle cx="${x(i).toFixed(1)}" cy="${y(p.v).toFixed(1)}" r="4" class="dot"/>`).join('')}
       ${pts.map((p, i) => `<rect x="${(x(i) - 12).toFixed(1)}" y="0" width="24" height="${H}" class="hit" data-tip="${fmtDate(p.date)}: ${fmt(p.v)}"/>`).join('')}
@@ -233,21 +246,21 @@ function lineChart(pts, label, fmt = fmtKg) {
     </svg>`;
 }
 
-function recordsCard(sessions) {
+function recordsCard(sessions, load) {
   const r = st.machineRecords(sessions);
-  const p = st.progress(sessions);
+  const p = st.progress(sessions, load.level ? st.sessionMaxWeight : st.sessionBestE1rm);
   const row = (label, value, date) =>
     value ? `<div><dt>${label}</dt><dd>${value}</dd><small>${fmtDate(date)}</small></div>` : '';
   return `
     <section class="card">
       <h2>Rekorde</h2>
       <dl class="records">
-        ${row('Schwerster Satz', r.heaviest && `${fmtKg(r.heaviest.value)} × ${fmtNum(r.heaviest.reps)}`, r.heaviest?.date)}
-        ${row('Bestes 1RM (geschätzt)', r.bestE1rm && fmtKg(r.bestE1rm.value), r.bestE1rm?.date)}
-        ${row('Höchstes Volumen', r.volume && fmtVol(r.volume.value), r.volume?.date)}
-        ${row('Meiste Wdh. in einem Satz', r.mostReps && `${fmtNum(r.mostReps.value)} × ${fmtKg(r.mostReps.weight)}`, r.mostReps?.date)}
+        ${row(load.level ? 'Höchste Stufe' : 'Schwerster Satz', r.heaviest && `${load.fmt(r.heaviest.value)} × ${fmtNum(r.heaviest.reps)}`, r.heaviest?.date)}
+        ${load.level ? '' : row('Bestes 1RM (geschätzt)', r.bestE1rm && fmtKg(r.bestE1rm.value), r.bestE1rm?.date)}
+        ${load.level ? '' : row('Höchstes Volumen', r.volume && fmtVol(r.volume.value), r.volume?.date)}
+        ${row('Meiste Wdh. in einem Satz', r.mostReps && `${fmtNum(r.mostReps.value)} × ${load.fmt(r.mostReps.weight)}`, r.mostReps?.date)}
       </dl>
-      ${p.sinceStart !== null ? `<p class="stats">1RM-Fortschritt: <strong>${fmtPct(p.sinceStart)}</strong> seit Beginn${p.last4Weeks !== null ? ` · <strong>${fmtPct(p.last4Weeks)}</strong> in 4 Wochen` : ''}</p>` : ''}
+      ${p.sinceStart !== null ? `<p class="stats">${load.level ? 'Stufen' : '1RM'}-Fortschritt: <strong>${fmtPct(p.sinceStart)}</strong> seit Beginn${p.last4Weeks !== null ? ` · <strong>${fmtPct(p.last4Weeks)}</strong> in 4 Wochen` : ''}</p>` : ''}
     </section>`;
 }
 
@@ -256,6 +269,7 @@ async function machineDetail(id) {
   if (!m) return go('#/');
   const sessions = await db.getSessions(id);
   setHeader(m.name, '#/');
+  const load = loadOf(m);
   const last = sessions[0];
   const best = sessions.length ? Math.max(...sessions.map(maxWeight)) : null;
 
@@ -276,23 +290,28 @@ async function machineDetail(id) {
       last
         ? `<section class="card">
             <h2>Letztes Training <small>${fmtDate(last.date)}</small></h2>
-            <ol class="sets">${last.sets.map((s) => `<li><span>${fmtNum(s.reps)} Wdh.</span><strong>${fmtNum(s.weight)} kg</strong></li>`).join('')}</ol>
+            <ol class="sets">${last.sets.map((s) => `<li><span>${fmtNum(s.reps)} Wdh.</span><strong>${load.fmt(s.weight)}</strong></li>`).join('')}</ol>
             ${last.note ? `<p class="notes">${esc(last.note)}</p>` : ''}
-            <p class="stats">Bestes Gewicht: <strong>${fmtNum(best)} kg</strong> · Trainings: <strong>${sessions.length}</strong></p>
+            <p class="stats">${load.level ? 'Höchste Stufe' : 'Bestes Gewicht'}: <strong>${load.fmt(best)}</strong> · Trainings: <strong>${sessions.length}</strong></p>
           </section>`
         : ''
     }
 
-    ${sessions.length ? recordsCard(sessions) : ''}
+    ${sessions.length ? recordsCard(sessions, load) : ''}
 
     ${
       sessions.length > 1
         ? `<section class="card">
             <h2>Verlauf</h2>
             <div class="tabs" role="tablist">
-              <button type="button" role="tab" data-chart="weight" aria-selected="true">Höchstgewicht</button>
-              <button type="button" role="tab" data-chart="e1rm" aria-selected="false">1RM</button>
-              <button type="button" role="tab" data-chart="volume" aria-selected="false">Volumen</button>
+              ${
+                load.level
+                  ? `<button type="button" role="tab" data-chart="weight" aria-selected="true">Höchste Stufe</button>
+                     <button type="button" role="tab" data-chart="reps" aria-selected="false">Wdh. gesamt</button>`
+                  : `<button type="button" role="tab" data-chart="weight" aria-selected="true">Höchstgewicht</button>
+                     <button type="button" role="tab" data-chart="e1rm" aria-selected="false">1RM</button>
+                     <button type="button" role="tab" data-chart="volume" aria-selected="false">Volumen</button>`
+              }
             </div>
             <div id="chart"></div>
           </section>`
@@ -307,8 +326,8 @@ async function machineDetail(id) {
               ${sessions
                 .map(
                   (s) => `<li><a href="#/m/${m.id}/log/${s.id}">
-                    <div class="li-main"><strong>${fmtDate(s.date)}</strong><small>${esc(setsSummary(s.sets))}</small></div>
-                    <div class="li-side"><small>Vol. ${fmtNum(volume(s))}</small></div>
+                    <div class="li-main"><strong>${fmtDate(s.date)}</strong><small>${esc(setsSummary(s.sets, load))}</small></div>
+                    <div class="li-side"><small>${load.level ? `${fmtNum(st.sessionTotalReps(s))} Wdh.` : `Vol. ${fmtNum(volume(s))}`}</small></div>
                   </a></li>`
                 )
                 .join('')}
@@ -324,7 +343,8 @@ async function machineDetail(id) {
   if (chartEl) {
     const recent = sessions.slice(0, 30).reverse();
     const series = {
-      weight: ['Verlauf Höchstgewicht', st.sessionMaxWeight, fmtKg],
+      weight: [load.level ? 'Verlauf höchste Stufe' : 'Verlauf Höchstgewicht', st.sessionMaxWeight, load.fmt],
+      reps: ['Verlauf Wiederholungen gesamt', st.sessionTotalReps, (v) => `${fmtNum(v)} Wdh.`],
       e1rm: ['Verlauf geschätztes 1RM', st.sessionBestE1rm, fmtKg],
       volume: ['Verlauf Volumen', st.sessionVolume, fmtVol],
     };
@@ -383,6 +403,18 @@ async function editMachine(id, qr = '') {
         <button type="button" class="btn ghost small" id="add-setting">+ Einstellung hinzufügen</button>
       </fieldset>
 
+      <fieldset>
+        <legend>Belastung</legend>
+        <div class="segmented" role="radiogroup">
+          <label><input type="radio" name="loadType" value="kg" ${loadOf(m).level ? '' : 'checked'}><span>Gewicht (kg)</span></label>
+          <label><input type="radio" name="loadType" value="level" ${loadOf(m).level ? 'checked' : ''}><span>Stufe</span></label>
+        </div>
+        <label id="level-max" ${loadOf(m).level ? '' : 'hidden'}>Höchste Stufe
+          <input name="levelMax" inputmode="numeric" pattern="[0-9]*" value="${loadOf(m).level ? loadOf(m).max : 12}">
+        </label>
+        ${existing ? `<p class="hint">Beim Umstellen werden bisherige Trainings in der neuen Einheit angezeigt.</p>` : ''}
+      </fieldset>
+
       <label>Notizen
         <textarea name="notes" rows="2" placeholder="z. B. Griffposition, Ausführung …">${esc(m.notes)}</textarea>
       </label>
@@ -409,6 +441,10 @@ async function editMachine(id, qr = '') {
   const form = document.getElementById('form');
   const settingsEl = document.getElementById('settings');
   let qrCode = m.qrCode;
+
+  form.querySelectorAll('input[name=loadType]').forEach((r) =>
+    r.addEventListener('change', () => (document.getElementById('level-max').hidden = form.loadType.value !== 'level'))
+  );
 
   document.getElementById('add-setting').onclick = () => {
     settingsEl.insertAdjacentHTML('beforeend', settingRow());
@@ -453,7 +489,11 @@ async function editMachine(id, qr = '') {
     const settings = [...settingsEl.querySelectorAll('.setting-row')]
       .map((row) => ({ label: row.querySelector('.s-label').value.trim(), value: row.querySelector('.s-value').value.trim() }))
       .filter((s) => s.label || s.value);
-    await db.saveMachine({ ...m, name: fd.get('name').trim(), notes: fd.get('notes').trim(), settings, qrCode });
+    const load =
+      fd.get('loadType') === 'level'
+        ? { type: 'level', max: Math.min(99, Math.max(1, Math.round(parseNum(fd.get('levelMax')) || 12))) }
+        : { type: 'kg' };
+    await db.saveMachine({ ...m, name: fd.get('name').trim(), notes: fd.get('notes').trim(), settings, qrCode, load });
     toast('Gespeichert');
     // Neues Gerät: Verlauf ersetzen, damit „Zurück“ nicht wieder im Formular landet.
     if (existing) go(`#/m/${m.id}`);
@@ -472,7 +512,7 @@ async function editMachine(id, qr = '') {
 
 // ---------- Training erfassen ----------
 
-function setRow(i, reps = '', weight = '') {
+function setRow(i, reps = '', weight = '', load = KG) {
   return `
     <div class="set-row">
       <span class="set-no">${i}</span>
@@ -483,10 +523,10 @@ function setRow(i, reps = '', weight = '') {
         <small>Wdh.</small>
       </div>
       <div class="stepper">
-        <button type="button" data-step="-2.5" data-field="weight">−</button>
-        <input class="weight" inputmode="decimal" value="${esc(weight)}" aria-label="Gewicht in kg">
-        <button type="button" data-step="2.5" data-field="weight">+</button>
-        <small>kg</small>
+        <button type="button" data-step="-${load.step}" data-field="weight">−</button>
+        <input class="weight" inputmode="${load.level ? 'numeric' : 'decimal'}" value="${esc(weight)}" aria-label="${load.level ? 'Stufe' : 'Gewicht in kg'}">
+        <button type="button" data-step="${load.step}" data-field="weight">+</button>
+        <small>${load.unit}</small>
       </div>
       <button type="button" class="icon-btn remove" aria-label="Satz entfernen">✕</button>
     </div>`;
@@ -501,6 +541,7 @@ async function logSession(machineId, sessionId) {
   const initialSets = existing?.sets || prev?.sets || [{ reps: 12, weight: '' }, { reps: 12, weight: '' }, { reps: 12, weight: '' }];
 
   setHeader(existing ? 'Training bearbeiten' : m.name, `#/m/${m.id}`);
+  const load = loadOf(m);
 
   view.innerHTML = `
     ${
@@ -513,7 +554,7 @@ async function logSession(machineId, sessionId) {
         <input type="date" name="date" value="${existing ? existing.date : todayIso()}" required>
       </label>
       ${prev ? `<p class="info">Vorausgefüllt mit dem letzten Training (${fmtDate(prev.date)}).</p>` : ''}
-      <div id="sets">${initialSets.map((s, i) => setRow(i + 1, s.reps ?? '', s.weight == null ? '' : String(s.weight).replace('.', ','))).join('')}</div>
+      <div id="sets">${initialSets.map((s, i) => setRow(i + 1, s.reps ?? '', s.weight == null ? '' : String(s.weight).replace('.', ','), load)).join('')}</div>
       <button type="button" class="btn ghost small" id="add-set">+ Satz</button>
       <label>Notiz
         <input name="note" placeholder="optional" value="${esc(existing?.note)}">
@@ -531,7 +572,7 @@ async function logSession(machineId, sessionId) {
     const lastRow = rows[rows.length - 1];
     setsEl.insertAdjacentHTML(
       'beforeend',
-      setRow(rows.length + 1, lastRow?.querySelector('.reps').value ?? '', lastRow?.querySelector('.weight').value ?? '')
+      setRow(rows.length + 1, lastRow?.querySelector('.reps').value ?? '', lastRow?.querySelector('.weight').value ?? '', load)
     );
   };
 
@@ -544,16 +585,21 @@ async function logSession(machineId, sessionId) {
       renumber();
       return;
     }
-    const input = row.querySelector(btn.dataset.field === 'reps' ? '.reps' : '.weight');
-    const val = parseNum(input.value) ?? 0;
-    input.value = fmtNum(Math.max(0, val + parseFloat(btn.dataset.step))).replace(/\./g, '');
+    const isWeight = btn.dataset.field === 'weight';
+    const input = row.querySelector(isWeight ? '.weight' : '.reps');
+    const cur = parseNum(input.value);
+    let next = cur === null && isWeight && load.level ? load.min : (cur ?? 0) + parseFloat(btn.dataset.step);
+    next = Math.max(isWeight ? load.min : 0, next);
+    if (isWeight) next = Math.min(load.max, next);
+    input.value = fmtNum(next).replace(/\./g, '');
   });
 
   document.getElementById('form').onsubmit = async (e) => {
     e.preventDefault();
     const sets = [...setsEl.querySelectorAll('.set-row')]
       .map((row) => ({ reps: parseNum(row.querySelector('.reps').value), weight: parseNum(row.querySelector('.weight').value) }))
-      .filter((s) => s.reps !== null || s.weight !== null);
+      .filter((s) => s.reps !== null || s.weight !== null)
+      .map((s) => (load.level && s.weight !== null ? { ...s, weight: Math.min(load.max, Math.max(load.min, Math.round(s.weight))) } : s));
     if (!sets.length) return toast('Mindestens einen Satz eintragen.');
     const fd = new FormData(e.target);
     const session = {
@@ -564,10 +610,10 @@ async function logSession(machineId, sessionId) {
       note: fd.get('note').trim(),
       createdAt: existing?.createdAt || new Date().toISOString(),
     };
-    const records = st.newRecords(session, sessions);
+    const records = st.newRecords(session, sessions, { level: load.level });
     await db.saveSession(session);
     if (records.length) {
-      const text = { heaviest: (v) => `schwerster Satz ${fmtKg(v)}`, e1rm: (v) => `1RM ${fmtKg(v)}`, volume: (v) => `Volumen ${fmtVol(v)}` };
+      const text = { heaviest: (v) => (load.level ? load.fmt(v) : `schwerster Satz ${fmtKg(v)}`), e1rm: (v) => `1RM ${fmtKg(v)}`, volume: (v) => `Volumen ${fmtVol(v)}` };
       toast(`🏆 Neuer Rekord: ${records.map((r) => text[r.type](r.value)).join(' · ')}`, 4500);
     } else {
       toast('Training gespeichert 💪');
@@ -621,8 +667,8 @@ function barChart(weeks, valueOf, fmt, label) {
     </svg>`;
 }
 
-function heatmap(sessions, weeks = 26, today = new Date()) {
-  const daily = st.dailyStats(sessions);
+function heatmap(sessions, volumeOf, weeks = 26, today = new Date()) {
+  const daily = st.dailyStats(sessions, volumeOf);
   const first = st.weekStart(today);
   first.setDate(first.getDate() - 7 * (weeks - 1));
   const vols = [...daily.values()].map((d) => d.volume).filter((v) => v > 0).sort((a, b) => a - b);
@@ -645,7 +691,9 @@ function heatmap(sessions, weeks = 26, today = new Date()) {
         months.push(`<text x="${LEFT + w * (C + G)}" y="10" class="axis">${date.toLocaleDateString('de-DE', { month: 'short' })}</text>`);
       }
       const e = daily.get(iso);
-      const tip = e ? `${fmtDate(iso)}: ${e.sessions} Gerät${e.sessions > 1 ? 'e' : ''}, ${fmtVol(e.volume)}` : `${fmtDate(iso)}: kein Training`;
+      const tip = e
+        ? `${fmtDate(iso)}: ${e.sessions} Gerät${e.sessions > 1 ? 'e' : ''}${e.volume ? `, ${fmtVol(e.volume)}` : ''}`
+        : `${fmtDate(iso)}: kein Training`;
       cells.push(
         `<rect x="${LEFT + w * (C + G)}" y="${TOP + d * (C + G)}" width="${C}" height="${C}" rx="2" class="hm ${e ? `l${level(e.volume)}` : 'l0'}" data-tip="${tip}"/>`
       );
@@ -671,14 +719,17 @@ async function statsView() {
     view.innerHTML = `<p class="empty">Noch keine Trainings erfasst. Sobald du trainierst, erscheinen hier deine Statistiken.</p>`;
     return;
   }
-  const o = st.overview(sessions);
-  const weeks = st.weeklyStats(sessions, 12);
+  // Volumen in kg nur für kg-Geräte; Stufen-Trainings zählen als Trainingstage.
+  const levelIds = new Set(machines.filter(isLevelMachine).map((m) => m.id));
+  const volumeOf = (s) => (levelIds.has(s.machineId) ? 0 : st.sessionVolume(s));
+  const o = st.overview(sessions, new Date(), volumeOf);
+  const weeks = st.weeklyStats(sessions, 12, new Date(), volumeOf);
   const byMachine = machines
     .map((m) => {
       const list = sessions.filter((s) => s.machineId === m.id);
       if (!list.length) return null;
       const last = list.reduce((a, b) => (b.date > a.date ? b : a));
-      return { m, count: list.length, last, p: st.progress(list) };
+      return { m, count: list.length, last, p: st.progress(list, isLevelMachine(m) ? st.sessionMaxWeight : st.sessionBestE1rm) };
     })
     .filter(Boolean)
     .sort((a, b) => (b.p.sinceStart ?? -Infinity) - (a.p.sinceStart ?? -Infinity));
@@ -694,7 +745,7 @@ async function statsView() {
 
     <section class="card">
       <h2>Trainingskalender</h2>
-      <div class="scroll-x">${heatmap(sessions)}</div>
+      <div class="scroll-x">${heatmap(sessions, volumeOf)}</div>
     </section>
 
     <section class="card">
@@ -705,7 +756,7 @@ async function statsView() {
     <section class="card">
       <h2>Volumen pro Woche</h2>
       ${barChart(weeks, (w) => w.volume, fmtVol, 'Volumen pro Woche, letzte 12 Wochen')}
-      <p class="hint">Volumen = Wiederholungen × Gewicht, über alle Sätze.</p>
+      <p class="hint">Volumen = Wiederholungen × Gewicht, über alle Sätze (ohne Stufen-Geräte).</p>
     </section>
 
     <section class="card">
@@ -715,7 +766,7 @@ async function statsView() {
           .map(
             ({ m, count, last, p }) => `<li><a href="#/m/${m.id}">
               <div class="li-main"><strong>${esc(m.name)}</strong><small>${count}× · zuletzt ${st.parseDate(last.date).toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit' })}</small></div>
-              <div class="li-side"><span class="${p.sinceStart > 0 ? 'up' : p.sinceStart < 0 ? 'down' : ''}">${fmtPct(p.sinceStart)}</span><small>1RM seit Beginn</small></div>
+              <div class="li-side"><span class="${p.sinceStart > 0 ? 'up' : p.sinceStart < 0 ? 'down' : ''}">${fmtPct(p.sinceStart)}</span><small>${isLevelMachine(m) ? 'Stufe' : '1RM'} seit Beginn</small></div>
             </a></li>`
           )
           .join('')}
@@ -768,7 +819,7 @@ async function inbox(initial = '') {
           ${rows
             .map(
               (r) => `<li class="${r.status === 'new' ? '' : 'muted'}"><div class="row-item">
-                <div class="li-main"><strong>${esc(machines.get(r.machineId)?.name ?? r.machineId)}</strong><small>${fmtDate(r.date)} · ${esc(setsSummary(r.sets))}</small></div>
+                <div class="li-main"><strong>${esc(machines.get(r.machineId)?.name ?? r.machineId)}</strong><small>${fmtDate(r.date)} · ${esc(setsSummary(r.sets, loadOf(machines.get(r.machineId))))}</small></div>
                 <div class="li-side"><small>${label[r.status]}</small></div>
               </div></li>`
             )
@@ -786,7 +837,7 @@ async function inbox(initial = '') {
         for (const r of fresh.sort((a, b) => a.date.localeCompare(b.date))) {
           const session = { id: db.uid(), machineId: r.machineId, date: r.date, sets: r.sets, note: '⌚ Apple Watch', createdAt: new Date().toISOString() };
           const prev = await db.getSessions(r.machineId);
-          if (st.newRecords(session, prev).length) recordMsgs.push(machines.get(r.machineId).name);
+          if (st.newRecords(session, prev, { level: isLevelMachine(machines.get(r.machineId)) }).length) recordMsgs.push(machines.get(r.machineId).name);
           await db.saveSession(session);
         }
         toast(
