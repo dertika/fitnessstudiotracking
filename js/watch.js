@@ -14,9 +14,15 @@ export function buildWatchConfig(machines, lastSessionByMachine = {}) {
     let name = m.name.trim() || 'Gerät';
     for (let i = 2; out[name]; i++) name = `${m.name.trim()} (${i})`;
     const lines = [];
-    if (m.settings.length) lines.push(m.settings.map((s) => `${s.label}: ${s.value}`).join('\n'));
+    const filled = m.settings.filter((s) => String(s.value ?? '').trim());
+    if (filled.length) lines.push(filled.map((s) => `${s.label}: ${s.value}`).join('\n'));
+    const level = m.load?.type === 'level';
+    if (level) lines.push(`Eingabe: Stufe 1–${m.load.max ?? 12} (bei „Gewicht“ eingeben)`);
     const last = lastSessionByMachine[m.id];
-    if (last) lines.push(`Zuletzt: ${last.sets.map((s) => `${fmt(s.reps ?? 0)}×${fmt(s.weight ?? 0)}`).join(' / ')} kg`);
+    if (last) {
+      const sets = last.sets.map((s) => `${fmt(s.reps ?? 0)}×${level ? 'St. ' : ''}${fmt(s.weight ?? 0)}`).join(' / ');
+      lines.push(`Zuletzt: ${sets}${level ? '' : ' kg'}`);
+    }
     out[name] = { id: m.id, info: lines.join('\n\n') || 'Keine Einstellungen' };
   }
   return out;

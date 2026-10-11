@@ -16,6 +16,7 @@ export function e1rm(set) {
 export const sessionMaxWeight = (s) => Math.max(0, ...s.sets.map((x) => x.weight ?? 0));
 export const sessionVolume = (s) => s.sets.reduce((sum, x) => sum + (x.reps ?? 0) * (x.weight ?? 0), 0);
 export const sessionBestE1rm = (s) => Math.max(0, ...s.sets.map(e1rm));
+export const sessionTotalReps = (s) => s.sets.reduce((sum, x) => sum + (x.reps ?? 0), 0);
 
 // ---- Datum ----
 
@@ -53,11 +54,11 @@ const addDays = (date, n) => new Date(date.getFullYear(), date.getMonth(), date.
 // ---- Gesamtübersicht ----
 
 // Volumen und Anzahl Trainings pro Tag.
-export function dailyStats(sessions) {
+export function dailyStats(sessions, volumeOf = sessionVolume) {
   const map = new Map();
   for (const s of sessions) {
     const e = map.get(s.date) || { volume: 0, sessions: 0 };
-    e.volume += sessionVolume(s);
+    e.volume += volumeOf(s);
     e.sessions += 1;
     map.set(s.date, e);
   }
@@ -65,7 +66,7 @@ export function dailyStats(sessions) {
 }
 
 // Die letzten `weeks` Wochen (älteste zuerst), inkl. der laufenden.
-export function weeklyStats(sessions, weeks = 12, today = new Date()) {
+export function weeklyStats(sessions, weeks = 12, today = new Date(), volumeOf = sessionVolume) {
   const current = weekStart(today);
   const list = [];
   for (let i = weeks - 1; i >= 0; i--) {
@@ -77,7 +78,7 @@ export function weeklyStats(sessions, weeks = 12, today = new Date()) {
     const w = byKey.get(weekKey(parseDate(s.date)));
     if (!w) continue;
     w.days.add(s.date);
-    w.volume += sessionVolume(s);
+    w.volume += volumeOf(s);
     w.sets += s.sets.length;
   }
   return list.map((w) => ({ ...w, days: w.days.size }));
@@ -97,11 +98,11 @@ export function weekStreak(sessions, today = new Date()) {
   return streak;
 }
 
-export function overview(sessions, today = new Date()) {
+export function overview(sessions, today = new Date(), volumeOf = sessionVolume) {
   const monthPrefix = toIso(today).slice(0, 7);
   const days = new Set(sessions.map((s) => s.date));
   const daysThisMonth = [...days].filter((d) => d.startsWith(monthPrefix)).length;
-  const last8 = weeklyStats(sessions, 8, today);
+  const last8 = weeklyStats(sessions, 8, today, volumeOf);
   const thisWeek = last8[last8.length - 1];
   // Durchschnitt nur über abgeschlossene Wochen (ohne die laufende).
   const done = last8.slice(0, -1);
@@ -137,29 +138,32 @@ export function machineRecords(sessions) {
   return rec;
 }
 
-// 1RM-Veränderung in Prozent: seit dem ersten Training und gegenüber dem letzten Training vor >= 4 Wochen.
-export function progress(sessions) {
-  const sorted = sessions.filter((s) => sessionBestE1rm(s) > 0).sort((a, b) => a.date.localeCompare(b.date));
+// Veränderung in Prozent (Standard: geschätztes 1RM; bei Stufen-Geräten die höchste Stufe):
+// seit dem ersten Training und gegenüber dem letzten Training vor >= 4 Wochen.
+export function progress(sessions, metric = sessionBestE1rm) {
+  const sorted = sessions.filter((s) => metric(s) > 0).sort((a, b) => a.date.localeCompare(b.date));
   if (sorted.length < 2) return { sinceStart: null, last4Weeks: null };
   const last = sorted[sorted.length - 1];
-  const now = sessionBestE1rm(last);
+  const now = metric(last);
   const pct = (from) => ((now - from) / from) * 100;
   const cutoff = toIso(addDays(parseDate(last.date), -28));
   const before = sorted.filter((s) => s.date <= cutoff).pop();
   return {
-    sinceStart: pct(sessionBestE1rm(sorted[0])),
-    last4Weeks: before ? pct(sessionBestE1rm(before)) : null,
+    sinceStart: pct(metric(sorted[0])),
+    last4Weeks: before ? pct(metric(before)) : null,
   };
 }
 
 // Welche Rekorde bricht `session` gegenüber `previous`? Ohne Vorgeschichte gibt es keine Rekorde.
-export function newRecords(session, previous) {
+// Bei Stufen-Geräten (`level`) zählt nur die höchste Stufe; 1RM und Volumen haben dort keine Aussage.
+export function newRecords(session, previous, { level = false } = {}) {
   const prev = previous.filter((s) => s.id !== session.id && s.sets.length);
   if (!prev.length) return [];
   const old = machineRecords(prev);
   const cur = machineRecords([session]);
   const out = [];
   if (cur.heaviest && old.heaviest && cur.heaviest.value > old.heaviest.value) out.push({ type: 'heaviest', value: cur.heaviest.value });
+  if (level) return out;
   if (cur.bestE1rm && old.bestE1rm && cur.bestE1rm.value > old.bestE1rm.value + 0.01) out.push({ type: 'e1rm', value: cur.bestE1rm.value });
   if (cur.volume && old.volume && cur.volume.value > old.volume.value) out.push({ type: 'volume', value: cur.volume.value });
   return out;
