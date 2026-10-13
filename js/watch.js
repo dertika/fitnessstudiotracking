@@ -7,25 +7,33 @@
 const fmt = (n) => String(n).replace('.', ',');
 
 // Geräteliste für den Watch-Kurzbefehl: { "<Name>": { id, info } }.
+// Mit `category` nur die Geräte dieser Kategorie (für einen Kurzbefehl pro Trainingstag).
 // Doppelte Namen bekommen eine Nummer, weil die Namen in der Watch-Auswahl eindeutig sein müssen.
-export function buildWatchConfig(machines, lastSessionByMachine = {}) {
+export function buildWatchConfig(machines, lastSessionByMachine = {}, category = null) {
   const out = {};
   for (const m of machines) {
+    if (category && !(m.categories || []).includes(category)) continue;
     let name = m.name.trim() || 'Gerät';
     for (let i = 2; out[name]; i++) name = `${m.name.trim()} (${i})`;
-    const lines = [];
+    const blocks = [];
     const filled = m.settings.filter((s) => String(s.value ?? '').trim());
-    if (filled.length) lines.push(filled.map((s) => `${s.label}: ${s.value}`).join('\n'));
+    if (filled.length) blocks.push(filled.map((s) => `${s.label}: ${s.value}`).join('\n'));
     const level = m.load?.type === 'level';
-    if (level) lines.push(`Eingabe: Stufe 1–${m.load.max ?? 12} (bei „Gewicht“ eingeben)`);
+    if (level) blocks.push(`Eingabe: Stufe 1–${m.load.max ?? 12} (bei „Gewicht“ eingeben)`);
     const last = lastSessionByMachine[m.id];
     if (last) {
-      const sets = last.sets.map((s) => `${fmt(s.reps ?? 0)}×${level ? 'St. ' : ''}${fmt(s.weight ?? 0)}`).join(' / ');
-      lines.push(`Zuletzt: ${sets}${level ? '' : ' kg'}`);
+      const [, mo, d] = last.date.split('-');
+      const sets = last.sets.map((s, i) => `${i + 1}) ${fmt(s.reps ?? 0)} × ${level ? `Stufe ${fmt(s.weight ?? 0)}` : `${fmt(s.weight ?? 0)} kg`}`);
+      blocks.push([`Zuletzt (${d}.${mo}.):`, ...sets].join('\n'));
     }
-    out[name] = { id: m.id, info: lines.join('\n\n') || 'Keine Einstellungen' };
+    out[name] = { id: m.id, info: blocks.join('\n\n') || 'Keine Einstellungen' };
   }
   return out;
+}
+
+// Alle verwendeten Kategorien, alphabetisch.
+export function allCategories(machines) {
+  return [...new Set(machines.flatMap((m) => m.categories || []))].sort((a, b) => a.localeCompare(b, 'de'));
 }
 
 const num = (v) => {

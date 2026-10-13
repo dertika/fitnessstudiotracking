@@ -1,5 +1,5 @@
 // Bei Änderungen an den App-Dateien die Version erhöhen, damit der Cache erneuert wird.
-const CACHE = 'gym-tracker-v5';
+const CACHE = 'gym-tracker-v6';
 const ASSETS = [
   './',
   'index.html',

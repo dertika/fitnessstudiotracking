@@ -293,8 +293,28 @@ legend { padding: 0 6px; color: var(--muted); font-size: 0.95rem; }
 
 /* ---------- Belastungsart ---------- */
 .segmented { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; padding: 4px; border-radius: 12px; background: var(--surface-2); }
-.form .segmented label { display: block; color: var(--text); }
-.segmented input { position: absolute; opacity: 0; pointer-events: none; }
+.form .segmented label { position: relative; display: block; color: var(--text); }
+.segmented input { position: absolute; inset: 0; width: 1px; height: 1px; min-height: 0; padding: 0; opacity: 0; pointer-events: none; }
 .segmented span { display: block; padding: 10px; border-radius: 9px; text-align: center; font-weight: 600; cursor: pointer; }
 .segmented input:checked + span { background: var(--accent); color: var(--accent-text); }
 .segmented input:focus-visible + span { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* ---------- Kategorien ---------- */
+.chips { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 2px; scrollbar-width: none; }
+.chips::-webkit-scrollbar { display: none; }
+.chips.wrap { flex-wrap: wrap; overflow: visible; }
+.chip {
+  flex: none;
+  min-height: 36px;
+  padding: 6px 14px;
+  border: 1px solid var(--surface-2);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-size: 0.95rem;
+  cursor: pointer;
+}
+.chip[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: var(--accent-text); font-weight: 600; }
+.li-main small.cats { color: var(--accent); font-size: 0.8rem; }
+.row input { flex: 1; min-width: 0; }
