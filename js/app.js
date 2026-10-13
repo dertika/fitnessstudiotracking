@@ -50,6 +50,23 @@ function setHeader(title, back) {
 
 const go = (hash) => (location.hash = hash);
 
+// Kleine Merk-Werte pro Gerät (z. B. gewählter Filter). Darf fehlen, z. B. im privaten Modus.
+const pref = {
+  get(key) {
+    try {
+      return localStorage.getItem(`gt-${key}`);
+    } catch {
+      return null;
+    }
+  },
+  set(key, value) {
+    try {
+      if (value === null) localStorage.removeItem(`gt-${key}`);
+      else localStorage.setItem(`gt-${key}`, value);
+    } catch {}
+  },
+};
+
 function setsSummary(sets, load = KG) {
   return sets.map((s) => `${fmtNum(s.reps)}×${load.level ? 'St. ' : ''}${fmtNum(s.weight)}`).join(' · ');
 }
@@ -119,21 +136,32 @@ async function home() {
   sessions.forEach((s) => {
     if (!last[s.machineId] || s.date > last[s.machineId].date) last[s.machineId] = s;
   });
+  const categories = watch.allCategories(machines);
+  let activeCat = pref.get('category') || '';
+  if (!categories.includes(activeCat)) activeCat = '';
 
   view.innerHTML = `
     <a class="btn primary big" href="#/scan">
       <span class="btn-icon">⌗</span> Gerät scannen
     </a>
+    ${
+      categories.length
+        ? `<div class="chips" id="cat-filter" role="group" aria-label="Kategorie">
+            ${['', ...categories].map((c) => `<button type="button" class="chip" data-cat="${esc(c)}" aria-pressed="${c === activeCat}">${c ? esc(c) : 'Alle'}</button>`).join('')}
+          </div>`
+        : ''
+    }
     ${machines.length > 3 ? `<input id="search" class="search" type="search" placeholder="Gerät suchen …" autocomplete="off">` : ''}
     <ul class="list" id="machine-list">
       ${machines
         .map(
           (m) => `
-        <li data-name="${esc(m.name.toLowerCase())}">
+        <li data-name="${esc(m.name.toLowerCase())}" data-cats="${esc(JSON.stringify(m.categories || []))}">
           <a href="#/m/${m.id}">
             <div class="li-main">
               <strong>${esc(m.name)}</strong>
               <small>${m.settings.length ? esc(m.settings.map((s) => `${s.label}: ${s.value}`).join(' · ')) : 'Keine Einstellungen'}</small>
+              ${m.categories?.length ? `<small class="cats">${esc(m.categories.join(' · '))}</small>` : ''}
             </div>
             <div class="li-side">${last[m.id] ? `<small>${fmtDate(last[m.id].date)}</small><span>${loadOf(m).fmt(maxWeight(last[m.id]))}</span>` : ''}</div>
           </a>
@@ -148,14 +176,23 @@ async function home() {
   `;
 
   const search = document.getElementById('search');
-  if (search) {
-    search.addEventListener('input', () => {
-      const q = search.value.trim().toLowerCase();
-      view.querySelectorAll('#machine-list li').forEach((li) => {
-        li.hidden = q && !li.dataset.name.includes(q);
-      });
+  const applyFilter = () => {
+    const q = search ? search.value.trim().toLowerCase() : '';
+    view.querySelectorAll('#machine-list li').forEach((li) => {
+      const inCat = !activeCat || JSON.parse(li.dataset.cats).includes(activeCat);
+      li.hidden = !inCat || (q && !li.dataset.name.includes(q));
     });
-  }
+  };
+  if (search) search.addEventListener('input', applyFilter);
+  view.querySelectorAll('#cat-filter .chip').forEach((chip) => {
+    chip.onclick = () => {
+      activeCat = chip.dataset.cat;
+      pref.set('category', activeCat || null);
+      view.querySelectorAll('#cat-filter .chip').forEach((c) => c.setAttribute('aria-pressed', c === chip));
+      applyFilter();
+    };
+  });
+  applyFilter();
 }
 
 // ---------- Scannen ----------
@@ -361,6 +398,7 @@ async function machineDetail(id) {
 // ---------- Gerät anlegen / bearbeiten ----------
 
 const DEFAULT_SETTINGS = ['Sitzhöhe', 'Rückenlehne'];
+const DEFAULT_CATEGORIES = ['Oberkörper', 'Beine', 'Rumpf', 'Zirkel'];
 
 function settingRow(label = '', value = '') {
   return `
@@ -389,6 +427,10 @@ async function editMachine(id, qr = '') {
   };
 
   setHeader(existing ? 'Gerät bearbeiten' : 'Neues Gerät', existing ? `#/m/${m.id}` : '#/');
+  const used = watch.allCategories(await db.getMachines());
+  const selected = new Set(m.categories || []);
+  const catOptions = [...new Set([...DEFAULT_CATEGORIES, ...used, ...selected])];
+  const catChip = (c) => `<button type="button" class="chip" data-cat="${esc(c)}" aria-pressed="${selected.has(c)}">${esc(c)}</button>`;
 
   view.innerHTML = `
     <form id="form" class="form" autocomplete="off">
@@ -401,6 +443,15 @@ async function editMachine(id, qr = '') {
         <legend>Einstellungen am Gerät</legend>
         <div id="settings">${m.settings.map((s) => settingRow(s.label, s.value)).join('')}</div>
         <button type="button" class="btn ghost small" id="add-setting">+ Einstellung hinzufügen</button>
+      </fieldset>
+
+      <fieldset>
+        <legend>Kategorien</legend>
+        <div class="chips wrap" id="cats">${catOptions.map(catChip).join('')}</div>
+        <div class="row">
+          <input id="new-cat" placeholder="Neue Kategorie" autocapitalize="sentences" enterkeyhint="done">
+          <button type="button" class="btn ghost small" id="add-cat">Hinzufügen</button>
+        </div>
       </fieldset>
 
       <fieldset>
@@ -441,6 +492,31 @@ async function editMachine(id, qr = '') {
   const form = document.getElementById('form');
   const settingsEl = document.getElementById('settings');
   let qrCode = m.qrCode;
+
+  const catsEl = document.getElementById('cats');
+  catsEl.addEventListener('click', (e) => {
+    const chip = e.target.closest('.chip');
+    if (chip) chip.setAttribute('aria-pressed', chip.getAttribute('aria-pressed') !== 'true');
+  });
+  const newCat = document.getElementById('new-cat');
+  const addCat = () => {
+    const name = newCat.value.trim();
+    if (!name) return;
+    const found = [...catsEl.children].find((c) => c.dataset.cat.toLowerCase() === name.toLowerCase());
+    if (found) found.setAttribute('aria-pressed', 'true');
+    else {
+      selected.add(name);
+      catsEl.insertAdjacentHTML('beforeend', catChip(name));
+    }
+    newCat.value = '';
+  };
+  document.getElementById('add-cat').onclick = addCat;
+  newCat.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      addCat();
+    }
+  });
 
   form.querySelectorAll('input[name=loadType]').forEach((r) =>
     r.addEventListener('change', () => (document.getElementById('level-max').hidden = form.loadType.value !== 'level'))
@@ -493,7 +569,8 @@ async function editMachine(id, qr = '') {
       fd.get('loadType') === 'level'
         ? { type: 'level', max: Math.min(99, Math.max(1, Math.round(parseNum(fd.get('levelMax')) || 12))) }
         : { type: 'kg' };
-    await db.saveMachine({ ...m, name: fd.get('name').trim(), notes: fd.get('notes').trim(), settings, qrCode, load });
+    const categories = [...catsEl.querySelectorAll('.chip[aria-pressed=true]')].map((c) => c.dataset.cat);
+    await db.saveMachine({ ...m, name: fd.get('name').trim(), notes: fd.get('notes').trim(), settings, qrCode, load, categories });
     toast('Gespeichert');
     // Neues Gerät: Verlauf ersetzen, damit „Zurück“ nicht wieder im Formular landet.
     if (existing) go(`#/m/${m.id}`);
@@ -538,7 +615,8 @@ async function logSession(machineId, sessionId) {
   const existing = sessionId ? await db.getSession(sessionId) : null;
   const sessions = await db.getSessions(machineId);
   const prev = existing ? null : sessions[0];
-  const initialSets = existing?.sets || prev?.sets || [{ reps: 12, weight: '' }, { reps: 12, weight: '' }, { reps: 12, weight: '' }];
+  // Neues Training startet mit einem Satz; weitere über „+ Satz“ (dann mit den Werten vom letzten Mal an dieser Position).
+  const initialSets = existing?.sets || [prev?.sets[0] || { reps: 12, weight: '' }];
 
   setHeader(existing ? 'Training bearbeiten' : m.name, `#/m/${m.id}`);
   const load = loadOf(m);
@@ -553,7 +631,7 @@ async function logSession(machineId, sessionId) {
       <label>Datum
         <input type="date" name="date" value="${existing ? existing.date : todayIso()}" required>
       </label>
-      ${prev ? `<p class="info">Vorausgefüllt mit dem letzten Training (${fmtDate(prev.date)}).</p>` : ''}
+      ${prev ? `<p class="info">Letztes Training (${fmtDate(prev.date)}): ${esc(setsSummary(prev.sets, load))}</p>` : ''}
       <div id="sets">${initialSets.map((s, i) => setRow(i + 1, s.reps ?? '', s.weight == null ? '' : String(s.weight).replace('.', ','), load)).join('')}</div>
       <button type="button" class="btn ghost small" id="add-set">+ Satz</button>
       <label>Notiz
@@ -570,10 +648,10 @@ async function logSession(machineId, sessionId) {
   document.getElementById('add-set').onclick = () => {
     const rows = setsEl.querySelectorAll('.set-row');
     const lastRow = rows[rows.length - 1];
-    setsEl.insertAdjacentHTML(
-      'beforeend',
-      setRow(rows.length + 1, lastRow?.querySelector('.reps').value ?? '', lastRow?.querySelector('.weight').value ?? '', load)
-    );
+    const fromPrev = prev?.sets[rows.length];
+    const reps = fromPrev ? fromPrev.reps ?? '' : lastRow?.querySelector('.reps').value ?? '';
+    const weight = fromPrev ? (fromPrev.weight == null ? '' : String(fromPrev.weight).replace('.', ',')) : lastRow?.querySelector('.weight').value ?? '';
+    setsEl.insertAdjacentHTML('beforeend', setRow(rows.length + 1, reps, weight, load));
   };
 
   setsEl.addEventListener('click', (e) => {
@@ -919,8 +997,20 @@ function watchHelp() {
     </section>
 
     <section class="card prose">
+      <h2>Ein Kurzbefehl pro Kategorie</h2>
+      <p>Damit auf der Watch nur die Geräte des Trainingstags erscheinen (z. B. Beine):</p>
+      <ol>
+        <li>Am Gerät unter „Gerät bearbeiten“ Kategorien vergeben.</li>
+        <li>In der Kurzbefehle-App den Kurzbefehl „Training“ lange drücken → <strong>Duplizieren</strong> und umbenennen, z. B. „Training Beine“.</li>
+        <li>Hier in ⚙︎ auf <strong>„Liste ‚Beine‘ kopieren“</strong> tippen und im Duplikat die erste Text-Aktion ersetzen.</li>
+        <li>Beim Duplikat ggf. „Auf Apple Watch zeigen“ wieder einschalten.</li>
+      </ol>
+      <p class="hint">Alle Kurzbefehle schreiben in dieselbe Liste „Gym Log“; der Import ordnet die Trainings über die Geräte-ID zu.</p>
+    </section>
+
+    <section class="card prose">
       <h2>Neue Geräte oder geänderte Einstellungen</h2>
-      <p>Geräteliste erneut kopieren und in Schritt 2.1 den Text ersetzen. Das „letzte Training“ auf der Watch ist der Stand vom Kopieren.</p>
+      <p>Liste erneut kopieren und in Schritt 2.1 den Text ersetzen. „Zuletzt“ auf der Watch ist der Stand vom Kopieren – nach dem Training also neu kopieren, wenn du die aktuellen Werte sehen möchtest.</p>
     </section>
   `;
 }
@@ -948,7 +1038,15 @@ async function settings() {
     <section class="card">
       <h2>Apple Watch</h2>
       <p class="hint">Trainings per Kurzbefehl auf der Watch erfassen, ohne iPhone im Studio.</p>
-      <button class="btn primary" id="copy-watch">Geräteliste für Watch kopieren</button>
+      <p class="hint">Liste nach dem Training neu kopieren, damit „Zuletzt“ auf der Watch aktuell ist.</p>
+      ${watch
+        .allCategories(machines)
+        .map((c) => {
+          const n = machines.filter((m) => (m.categories || []).includes(c)).length;
+          return `<button class="btn ghost copy-watch" data-cat="${esc(c)}">Liste „${esc(c)}“ kopieren (${n})</button>`;
+        })
+        .join('')}
+      <button class="btn primary copy-watch" id="copy-watch" data-cat="">Alle Geräte kopieren (${machines.length})</button>
       <a class="btn ghost" href="#/inbox">Watch-Einträge einfügen</a>
       <a class="btn ghost" href="#/watch-help">Anleitung</a>
     </section>
@@ -958,19 +1056,22 @@ async function settings() {
     </section>
   `;
 
-  document.getElementById('copy-watch').onclick = async () => {
-    const last = {};
-    sessions.forEach((x) => {
-      if (!last[x.machineId] || x.date > last[x.machineId].date) last[x.machineId] = x;
-    });
-    const json = JSON.stringify(watch.buildWatchConfig(machines, last));
+  const lastByMachine = {};
+  sessions.forEach((x) => {
+    if (!lastByMachine[x.machineId] || x.date > lastByMachine[x.machineId].date) lastByMachine[x.machineId] = x;
+  });
+  view.querySelectorAll('.copy-watch').forEach((btn) => (btn.onclick = async () => {
+    const cat = btn.dataset.cat || null;
+    const config = watch.buildWatchConfig(machines, lastByMachine, cat);
+    const json = JSON.stringify(config);
+    const n = Object.keys(config).length;
     try {
       await navigator.clipboard.writeText(json);
-      toast(`Geräteliste kopiert (${machines.length} Geräte)`);
+      toast(`${cat ? `„${cat}“` : 'Geräteliste'} kopiert (${n} Geräte)`);
     } catch {
       prompt('Kopieren nicht möglich – bitte manuell kopieren:', json);
     }
-  };
+  }));
 
   document.getElementById('export').onclick = async () => {
     const data = await db.exportAll();
