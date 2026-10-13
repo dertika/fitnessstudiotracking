@@ -35,6 +35,15 @@ html, body {
   -webkit-tap-highlight-color: transparent;
 }
 
+/* Kein Doppeltipp-Zoom beim schnellen Tippen (z. B. auf +/−); Zwei-Finger-Zoom bleibt möglich. */
+html { touch-action: manipulation; }
+button, .btn, .chip, .icon-btn {
+  touch-action: manipulation;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+
 a { color: var(--accent); }
 
 .topbar {
