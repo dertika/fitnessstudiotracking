@@ -1,5 +1,5 @@
 // Bei Änderungen an den App-Dateien die Version erhöhen, damit der Cache erneuert wird.
-const CACHE = 'gym-tracker-v7';
+const CACHE = 'gym-tracker-v8';
 const ASSETS = [
   './',
   'index.html',
@@ -10,6 +10,7 @@ const ASSETS = [
   'js/scanner.js',
   'js/stats.js',
   'js/watch.js',
+  'js/sync.js',
   'vendor/jsQR.js',
   'icons/icon-192.png',
   'icons/icon-512.png',

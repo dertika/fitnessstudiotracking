@@ -2,6 +2,7 @@ import * as db from './db.js';
 import { Scanner, decodeImageFile } from './scanner.js';
 import * as st from './stats.js';
 import * as watch from './watch.js';
+import * as sync from './sync.js';
 
 const view = document.getElementById('view');
 const titleEl = document.getElementById('title');
@@ -1017,6 +1018,113 @@ function watchHelp() {
 
 // ---------- Einstellungen / Backup ----------
 
+// ---------- Sicherung in GitHub ----------
+
+function fmtWhen(iso) {
+  if (!iso) return 'noch nie';
+  const d = new Date(iso);
+  const today = new Date().toDateString() === d.toDateString();
+  const time = d.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' });
+  return today ? `heute ${time}` : `${d.toLocaleDateString('de-DE')} ${time}`;
+}
+
+function renderSyncCard(card) {
+  const cfg = sync.getConfig();
+  const state = sync.getState();
+  if (!cfg) {
+    card.innerHTML = `
+      <h2>Sicherung in GitHub</h2>
+      <p class="hint">Sichert deine Daten automatisch nach jeder Änderung in ein <strong>privates</strong> GitHub-Repo – mit Versionsverlauf.</p>
+      <details class="manual">
+        <summary>Einrichtung (einmalig)</summary>
+        <ol class="steps">
+          <li>Auf GitHub ein <strong>neues privates Repo</strong> anlegen, z. B. <code>gym-tracker-daten</code> (nicht das öffentliche App-Repo).</li>
+          <li>GitHub → Settings → Developer settings → <strong>Fine-grained tokens</strong> → neuer Token: nur dieses Repo, Berechtigung <strong>Contents: Read and write</strong>.</li>
+          <li>Token unten eintragen und „Verbinden & testen“ tippen.</li>
+        </ol>
+      </details>
+      <form id="sync-form" class="form" autocomplete="off">
+        <label>GitHub-Benutzer
+          <input name="owner" value="dertika" autocapitalize="off" autocorrect="off" spellcheck="false" required>
+        </label>
+        <label>Privates Repo
+          <input name="repo" value="gym-tracker-daten" autocapitalize="off" autocorrect="off" spellcheck="false" required>
+        </label>
+        <label>Token
+          <input name="token" type="password" placeholder="github_pat_…" autocapitalize="off" autocorrect="off" spellcheck="false" required>
+        </label>
+        <button class="btn primary" type="submit">Verbinden & testen</button>
+      </form>
+      <p class="hint">Der Token bleibt nur auf diesem Gerät gespeichert und gilt nur für dieses eine Repo.</p>`;
+    card.querySelector('#sync-form').onsubmit = async (e) => {
+      e.preventDefault();
+      const btn = e.target.querySelector('button');
+      btn.disabled = true;
+      btn.textContent = 'Prüfe …';
+      const fd = new FormData(e.target);
+      try {
+        const info = await sync.connect({ owner: fd.get('owner'), repo: fd.get('repo'), token: fd.get('token') });
+        if (info.hasBackup && confirm('Im Repo liegt bereits eine Sicherung. Diese jetzt wiederherstellen? (Abbrechen = aktuelle Daten auf diesem Gerät hochladen)')) {
+          await sync.restore(await sync.fetchBackup());
+          toast('Sicherung wiederhergestellt');
+        } else {
+          await sync.backup({ force: true });
+          toast('Verbunden – erste Sicherung erstellt ✓');
+        }
+        settings();
+      } catch (err) {
+        toast(err.message, 4500);
+        btn.disabled = false;
+        btn.textContent = 'Verbinden & testen';
+      }
+    };
+    return;
+  }
+
+  const status = state.error
+    ? `<span class="down">⚠︎ ${esc(state.error)}</span>`
+    : state.pending
+      ? 'Sicherung ausstehend …'
+      : `Zuletzt gesichert: <strong>${fmtWhen(state.lastBackup)}</strong>`;
+  card.innerHTML = `
+    <h2>Sicherung in GitHub</h2>
+    <p>Repo: <strong>${esc(cfg.owner)}/${esc(cfg.repo)}</strong></p>
+    <p class="hint" id="sync-status">${status}</p>
+    <button class="btn primary" id="sync-now">Jetzt sichern</button>
+    <button class="btn ghost" id="sync-restore">Aus GitHub wiederherstellen</button>
+    <a class="btn ghost" href="https://github.com/${encodeURIComponent(cfg.owner)}/${encodeURIComponent(cfg.repo)}/commits" target="_blank" rel="noopener">Versionsverlauf auf GitHub</a>
+    <button class="btn danger" id="sync-off">Trennen</button>`;
+
+  card.querySelector('#sync-now').onclick = async (e) => {
+    e.target.disabled = true;
+    try {
+      const uploaded = await sync.backup();
+      toast(uploaded ? 'Gesichert ✓' : 'Schon aktuell ✓');
+    } catch (err) {
+      toast(err.message, 4500);
+    }
+    renderSyncCard(card);
+  };
+  card.querySelector('#sync-restore').onclick = async () => {
+    try {
+      const data = await sync.fetchBackup();
+      if (!data) return toast('Im Repo liegt noch keine Sicherung.');
+      const when = data.exportedAt ? fmtWhen(data.exportedAt) : 'unbekannt';
+      if (!confirm(`Sicherung aus GitHub wiederherstellen? Die Daten auf diesem Gerät werden ersetzt.\n\nStand: ${when} · ${data.machines.length} Geräte · ${data.sessions.length} Trainings`)) return;
+      await sync.restore(data);
+      toast('Sicherung wiederhergestellt');
+      settings();
+    } catch (err) {
+      toast(err.message, 4500);
+    }
+  };
+  card.querySelector('#sync-off').onclick = () => {
+    if (!confirm('Automatische Sicherung trennen? Die Sicherung im Repo bleibt erhalten, der Token wird von diesem Gerät entfernt.')) return;
+    sync.disconnect();
+    renderSyncCard(card);
+  };
+}
+
 async function settings() {
   setHeader('Einstellungen', '#/');
   const machines = await db.getMachines();
@@ -1027,7 +1135,7 @@ async function settings() {
     <section class="card">
       <h2>Daten</h2>
       <p>${machines.length} Geräte · ${sessions.length} Trainings</p>
-      <p class="hint">Alle Daten liegen nur auf diesem Gerät. Erstelle regelmäßig eine Sicherung (z. B. in iCloud Drive).</p>
+      <p class="hint">${sync.getConfig() ? 'Daten liegen auf diesem Gerät und werden automatisch in GitHub gesichert (siehe unten).' : 'Alle Daten liegen nur auf diesem Gerät. Richte unten die automatische Sicherung ein oder exportiere regelmäßig (z. B. in iCloud Drive).'}</p>
       <button class="btn primary" id="export">Sicherung exportieren</button>
       <label class="btn ghost">
         Sicherung importieren
@@ -1035,6 +1143,7 @@ async function settings() {
       </label>
       <p class="hint">Speicher dauerhaft: ${persisted ? 'ja ✓' : 'nicht garantiert – App über „Zum Home-Bildschirm“ installieren.'}</p>
     </section>
+    <section class="card" id="sync-card"></section>
     <section class="card">
       <h2>Apple Watch</h2>
       <p class="hint">Trainings per Kurzbefehl auf der Watch erfassen, ohne iPhone im Studio.</p>
@@ -1072,6 +1181,8 @@ async function settings() {
       prompt('Kopieren nicht möglich – bitte manuell kopieren:', json);
     }
   }));
+
+  renderSyncCard(document.getElementById('sync-card'));
 
   document.getElementById('export').onclick = async () => {
     const data = await db.exportAll();
@@ -1114,5 +1225,26 @@ if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('sw.js').catch((e) => console.warn('SW-Registrierung fehlgeschlagen', e));
 }
 if (navigator.storage?.persist) navigator.storage.persist().catch(() => {});
+
+sync.start((err) => toast(`Sicherung fehlgeschlagen: ${err.message}`, 4500));
+
+// Neues Gerät bzw. gelöschte Daten: Sicherung anbieten.
+(async () => {
+  if (!sync.getConfig()) return;
+  const [machines, sessions] = await Promise.all([db.getMachines(), db.getAllSessions()]);
+  if (machines.length || sessions.length) return;
+  try {
+    const data = await sync.fetchBackup();
+    if (!data || !data.machines?.length) return;
+    const when = data.exportedAt ? fmtWhen(data.exportedAt) : 'unbekannt';
+    if (confirm(`Keine Daten auf diesem Gerät. Sicherung aus GitHub wiederherstellen?\n\nStand: ${when} · ${data.machines.length} Geräte · ${data.sessions.length} Trainings`)) {
+      await sync.restore(data);
+      toast('Sicherung wiederhergestellt');
+      render();
+    }
+  } catch (err) {
+    console.warn('Sicherung nicht abrufbar', err);
+  }
+})();
 
 render();

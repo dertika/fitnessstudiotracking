@@ -13,6 +13,16 @@ PWA zum Tracken des Trainings im Fitnessstudio:
 - **Offline-fähig**, alle Daten nur lokal auf dem Gerät (IndexedDB).
 - **Sicherung** als JSON exportieren/importieren (Einstellungen ⚙︎).
 
+## Sicherung in GitHub
+
+Unter ⚙︎ → „Sicherung in GitHub“ lässt sich eine automatische Sicherung einrichten: Nach jeder Änderung lädt die App die komplette Sicherung als `gym-tracker.json` in ein **privates** Repo hoch (jede Sicherung = ein Commit, also mit Versionsverlauf). Auf einem neuen Gerät bietet die App das Wiederherstellen an.
+
+1. Auf GitHub ein neues **privates** Repo anlegen (z. B. `gym-tracker-daten`) – nicht dieses öffentliche App-Repo.
+2. Settings → Developer settings → **Fine-grained tokens** → Token nur für dieses Repo mit **Contents: Read and write**.
+3. In der App Benutzer, Repo und Token eintragen und „Verbinden & testen“ tippen.
+
+Der Token wird nur lokal auf dem Gerät gespeichert. Öffentliche Repos werden abgelehnt, ein leerer Datenstand wird nie automatisch hochgeladen.
+
 ## Apple Watch
 
 Trainings lassen sich ohne iPhone im Studio auf der Apple Watch erfassen: Ein Kurzbefehl speichert jedes Training als Erinnerung in der Liste „Gym Log“, ein zweiter Kurzbefehl auf dem iPhone kopiert sie, und die App übernimmt sie unter „⌚ Watch-Einträge einfügen“. Die Schritt-für-Schritt-Anleitung steht in der App unter ⚙︎ → Apple Watch → Anleitung.

@@ -4,6 +4,22 @@ const DB_VERSION = 1;
 
 let dbPromise;
 
+// Benachrichtigung nach jeder Änderung (für die automatische Sicherung).
+const listeners = new Set();
+export function onChange(cb) {
+  listeners.add(cb);
+  return () => listeners.delete(cb);
+}
+function changed() {
+  listeners.forEach((cb) => {
+    try {
+      cb();
+    } catch (e) {
+      console.warn(e);
+    }
+  });
+}
+
 function open() {
   if (!dbPromise) {
     dbPromise = new Promise((resolve, reject) => {
@@ -65,6 +81,7 @@ export async function findMachineByQr(code) {
 
 export async function saveMachine(machine) {
   await promisify((await store('machines', 'readwrite')).put(machine));
+  changed();
   return machine;
 }
 
@@ -75,7 +92,8 @@ export async function deleteMachine(id) {
   const idx = tx.objectStore('sessions').index('machineId');
   const keys = await promisify(idx.getAllKeys(id));
   keys.forEach((k) => tx.objectStore('sessions').delete(k));
-  return done(tx);
+  await done(tx);
+  changed();
 }
 
 // ---- Trainings ----
@@ -95,11 +113,13 @@ export async function getSession(id) {
 
 export async function saveSession(session) {
   await promisify((await store('sessions', 'readwrite')).put(session));
+  changed();
   return session;
 }
 
 export async function deleteSession(id) {
-  return promisify((await store('sessions', 'readwrite')).delete(id));
+  await promisify((await store('sessions', 'readwrite')).delete(id));
+  changed();
 }
 
 // ---- Backup ----
@@ -124,5 +144,6 @@ export async function importAll(data) {
   tx.objectStore('sessions').clear();
   data.machines.forEach((m) => tx.objectStore('machines').put(m));
   data.sessions.forEach((s) => tx.objectStore('sessions').put(s));
-  return done(tx);
+  await done(tx);
+  changed();
 }

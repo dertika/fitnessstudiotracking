@@ -327,3 +327,13 @@ legend { padding: 0 6px; color: var(--muted); font-size: 0.95rem; }
 .chip[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: var(--accent-text); font-weight: 600; }
 .li-main small.cats { color: var(--accent); font-size: 0.8rem; }
 .row input { flex: 1; min-width: 0; }
+
+/* ---------- Sicherung ---------- */
+#sync-card p { margin: 0 0 8px; }
+#sync-card .hint { text-align: left; }
+#sync-card .form { margin-top: 10px; }
+#sync-card .btn + .btn { margin-top: 10px; }
+.steps { margin: 6px 0 4px; padding-left: 1.3em; display: flex; flex-direction: column; gap: 6px; color: var(--muted); font-size: 0.92rem; }
+.steps code { padding: 1px 5px; border-radius: 5px; background: var(--surface-2); }
+.down { color: var(--down); }
+.card > .btn { width: 100%; }
