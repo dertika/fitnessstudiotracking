@@ -101,6 +101,7 @@ const routes = [
   [/^#\/stats$/, statsView],
   [/^#\/inbox(?:\?data=(.*))?$/, (data) => inbox(data ? decodeURIComponent(data) : '')],
   [/^#\/watch-help$/, watchHelp],
+  [/^#\/edge-lab$/, edgeLab],
 ];
 
 async function render() {
@@ -1018,6 +1019,86 @@ function watchHelp() {
 
 // ---------- Einstellungen / Backup ----------
 
+// ---------- Darstellung testen: iOS-Unschärfe am oberen Rand ----------
+// iOS 26 legt über installierte Web-Apps oben einen Unschärfe-Verlauf. Es gibt keinen offiziellen Schalter;
+// diese Seite schaltet Layout-Varianten um, damit sich auf dem Gerät prüfen lässt, welche hilft.
+
+const EDGE_VARIANTS = [
+  ['b', 'B Kopfzeile fixiert', 'Kopfzeile mit position: fixed statt sticky'],
+  ['c', 'C Farbband', 'Zusätzliches einfarbiges Band über die volle Breite am oberen Rand'],
+  ['d', 'D Mehr Abstand', 'Kopfzeile oben ca. 56 px höher, Inhalt rutscht unter den Verlauf'],
+  ['e', 'E Kein Abprallen', 'overscroll-behavior: none (kein Gummiband-Effekt)'],
+  ['f', 'F Ohne Kopfzeile', 'Nur zum Vergleich: Kopfzeile ausgeblendet'],
+];
+
+function edgeGet() {
+  return (pref.get('edge') || '').split(',').filter((v) => EDGE_VARIANTS.some(([k]) => k === v));
+}
+
+function applyEdge(list = edgeGet()) {
+  const root = document.documentElement;
+  EDGE_VARIANTS.forEach(([k]) => root.classList.toggle(`edge-${k}`, list.includes(k)));
+  let band = document.querySelector('.edge-band');
+  if (list.includes('c') && !band) {
+    band = document.createElement('div');
+    band.className = 'edge-band';
+    document.body.prepend(band);
+  } else if (!list.includes('c') && band) band.remove();
+  const bar = document.querySelector('.topbar');
+  root.style.setProperty('--topbar-h', `${bar.offsetHeight}px`);
+}
+window.addEventListener('resize', () => applyEdge());
+
+function edgeLab() {
+  setHeader('Darstellung testen', '#/settings');
+  const active = edgeGet();
+  const probe = document.createElement('div');
+  probe.style.cssText = 'position:fixed;top:0;left:0;width:1px;height:env(safe-area-inset-top);visibility:hidden';
+  document.body.append(probe);
+  const inset = probe.offsetHeight;
+  probe.remove();
+  const bar = document.querySelector('.topbar').getBoundingClientRect();
+  const ios = navigator.userAgent.match(/OS (\d+)[._](\d+)/);
+  const diag = [
+    ['Als App gestartet', matchMedia('(display-mode: standalone)').matches || navigator.standalone ? 'ja' : 'nein (Safari)'],
+    ['Statusleiste', document.querySelector('meta[name="apple-mobile-web-app-status-bar-style"]')?.content || '–'],
+    ['Abstand oben (Safe Area)', `${inset} px`],
+    ['Kopfzeile', `oben ${Math.round(bar.top)} px, Höhe ${Math.round(bar.height)} px`],
+    ['iOS', ios ? `${ios[1]}.${ios[2]}` : 'unbekannt'],
+  ];
+  view.innerHTML = `
+    <p class="info">Den Verlauf oben erzeugt iOS selbst. Tippe Varianten an (auch mehrere), schau dir den oberen Rand auf verschiedenen Seiten an und sag mir, welche hilft. Die Auswahl bleibt erhalten, bis du sie zurücksetzt.</p>
+    <section class="card">
+      <h2>Varianten</h2>
+      <div class="chips wrap" id="edge-chips">
+        ${EDGE_VARIANTS.map(([k, label]) => `<button type="button" class="chip" data-edge="${k}" aria-pressed="${active.includes(k)}">${label}</button>`).join('')}
+      </div>
+      <ul class="edge-desc">${EDGE_VARIANTS.map(([, label, desc]) => `<li><strong>${label.slice(0, 1)}</strong> ${desc}</li>`).join('')}</ul>
+      <button class="btn ghost" id="edge-reset">Zurücksetzen (A Standard)</button>
+    </section>
+    <section class="card">
+      <h2>Diagnose</h2>
+      <dl class="diag">${diag.map(([k, v]) => `<div><dt>${k}</dt><dd>${esc(v)}</dd></div>`).join('')}</dl>
+      <p class="hint">Aktiv: ${active.length ? active.map((k) => k.toUpperCase()).join(' + ') : 'A Standard'}</p>
+    </section>
+    <div class="edge-filler">${Array.from({ length: 12 }, (_, i) => `<div class="card"><strong>Testinhalt ${i + 1}</strong><p class="hint">Zum Scrollen, damit Inhalt unter den oberen Rand läuft.</p></div>`).join('')}</div>
+  `;
+  document.getElementById('edge-chips').onclick = (e) => {
+    const chip = e.target.closest('.chip');
+    if (!chip) return;
+    const set = new Set(edgeGet());
+    set.has(chip.dataset.edge) ? set.delete(chip.dataset.edge) : set.add(chip.dataset.edge);
+    pref.set('edge', [...set].join(',') || null);
+    applyEdge();
+    edgeLab();
+  };
+  document.getElementById('edge-reset').onclick = () => {
+    pref.set('edge', null);
+    applyEdge();
+    edgeLab();
+  };
+}
+
 // ---------- Sicherung in GitHub ----------
 
 function fmtWhen(iso) {
@@ -1162,6 +1243,7 @@ async function settings() {
     <section class="card">
       <h2>Info</h2>
       <p class="hint">Gym Tracker – QR-Code am Gerät scannen, Einstellungen ablesen, Sätze erfassen. Funktioniert offline.</p>
+      <a class="btn ghost" href="#/edge-lab">Darstellung testen (oberer Rand)</a>
     </section>
   `;
 
@@ -1225,6 +1307,8 @@ if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('sw.js').catch((e) => console.warn('SW-Registrierung fehlgeschlagen', e));
 }
 if (navigator.storage?.persist) navigator.storage.persist().catch(() => {});
+
+applyEdge();
 
 sync.start((err) => toast(`Sicherung fehlgeschlagen: ${err.message}`, 4500));
 

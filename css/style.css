@@ -337,3 +337,26 @@ legend { padding: 0 6px; color: var(--muted); font-size: 0.95rem; }
 .steps code { padding: 1px 5px; border-radius: 5px; background: var(--surface-2); }
 .down { color: var(--down); }
 .card > .btn { width: 100%; }
+
+/* ---------- Test-Varianten gegen den iOS-Unschärfe-Verlauf (siehe #/edge-lab) ---------- */
+html.edge-b .topbar { position: fixed; top: 0; left: 0; right: 0; }
+html.edge-b body { padding-top: var(--topbar-h, 56px); }
+.edge-band {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: calc(env(safe-area-inset-top) + 44px);
+  background: var(--bg);
+  z-index: 9;
+}
+html.edge-d .topbar { padding-top: calc(env(safe-area-inset-top) + 56px); }
+html.edge-e, html.edge-e body { overscroll-behavior: none; }
+html.edge-f .topbar { display: none; }
+.edge-desc { margin: 12px 0; padding-left: 1.2em; color: var(--muted); font-size: 0.9rem; display: flex; flex-direction: column; gap: 4px; }
+.diag { display: grid; gap: 6px; margin: 0 0 8px; }
+.diag div { display: flex; justify-content: space-between; gap: 12px; }
+.diag dt { color: var(--muted); }
+.diag dd { margin: 0; font-weight: 600; text-align: right; }
+.edge-filler { display: flex; flex-direction: column; gap: 14px; }
+.edge-filler p { margin: 4px 0 0; text-align: left; }
